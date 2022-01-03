@@ -19,7 +19,11 @@
  *  PA5 out HH D5
  *  PA6 out HH D6
  *  PA7 out HH D7
- *
+ */
+#define PORT_HI_HAT_PCM_VALUE PORTA
+#define BIT_HI_HAT_PCM_LATCH PA1
+
+/*
  *  PB0 out DIN Start
  *  PB1 out DIN Clock
  *  PB2 out LED DM
@@ -29,7 +33,6 @@
  *  PB6 out PWM BD Tune
  *  PB7 out PWM BD Velocity
  */
-
 #define PORT_DIN_START PORTB
 #define BIT_DIN_START PB0
 #define PORT_DIN_CLOCK PORTB
