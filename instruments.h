@@ -10,12 +10,14 @@
 #define INSTRUMENTS_H_
 
 typedef struct rim_shot {
-  int8_t status;
+  uint8_t status;
 }
 rim_shot_t;
 
 typedef struct hi_hat {
-  // uint16_t pcm_address;
+  uint8_t status;
+  uint16_t pcm_address;
+  uint16_t pcm_address_limit;  // PCM stops at this address
   uint8_t pcm_value;  // TODO: Remove this. Only for testing.
 }
 hi_hat_t;

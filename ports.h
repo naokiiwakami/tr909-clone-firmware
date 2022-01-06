@@ -28,10 +28,10 @@
  *  PB1 out DIN Clock
  *  PB2 out LED DM
  *  PB3 out LED Open Hi-Hat
- *  PB4 out PWM SD Velocity
- *  PB5 out PWM SD Tune
- *  PB6 out PWM BD Tune
- *  PB7 out PWM BD Velocity
+ *  PB4 out PWM SD Velocity  OC0
+ *  PB5 out PWM SD Tune      OC1A
+ *  PB6 out PWM BD Tune      OC1B
+ *  PB7 out PWM BD Velocity  OC2/OC1C
  */
 #define PORT_DIN_START PORTB
 #define BIT_DIN_START PB0
@@ -120,9 +120,9 @@
  *  PE0 out LED Rim Shot
  *  PE1 out LED Closed Hi-Hat
  *  PE2 out LED Hand Clap
- *  PE3 out PWM Hi-Hat Velocity
- *  PE4 out PWM Rim Short Velocity
- *  PE5 out PWM Hand Clap Velocity
+ *  PE3 out PWM Hi-Hat Velocity     OC3A
+ *  PE4 out PWM Rim Short Velocity  OC3B
+ *  PE5 out PWM Hand Clap Velocity  OC3C
  *  PE6 out LED Snare Drum
  *  PE7 out LED Bass Drum
  */
