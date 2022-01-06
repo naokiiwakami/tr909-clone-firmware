@@ -5,6 +5,7 @@
  * Author : naoki
  */ 
 
+#include <avr/interrupt.h>
 #include <avr/io.h>
 
 #include "instruments.h"
@@ -54,11 +55,30 @@ void InitializeInstruments() {
 uint16_t g_divider;
 
 void SetUpTimer() {
-  // 8-bit timer, 1/8 prescale = 128 micro second interval
+  /*
+   * Timer0
+   */
+  // 8-bit timer, 1/8 prescale = 128 micro second interval (CS01)
   // Fast non-inverting PWM (WGM01 +_ WGM00 + COM01 + COM00)
-  TCCR0 |= _BV(WGM01) | _BV(WGM00) | _BV(COM01) | _BV(COM00) | _BV(CS01);
+  TCCR0 = _BV(WGM01) | _BV(WGM00) | _BV(COM01) | _BV(COM00) | _BV(CS01);
   OCR0 = 127;
   g_divider = 0;
+  
+  /*
+   * Timer2
+   */
+  // normal mode (WGM21, WGM20 = 00), no prescale (CS20)
+  TCCR2 = _BV(CS20);
+  
+  /*
+   * Timer interrupts
+   */
+  // Timer2 overflow interrupt enabled (TOIE2)
+  TIMSK = _BV(TOIE2);
+}
+
+ISR(TIMER2_OVF_vect) {
+  PORTD ^= _BV(PD7); // toggle a test port
 }
 
 void SetUpIo() {
@@ -94,6 +114,7 @@ void SetUp() {
   InitializeInstruments();
   SetUpTimer();
   SetUpIo();
+  sei();
 }
 
 #define TRIGGER_SHUTDOWN_AT (255 - 16)  // 2.048 ms
