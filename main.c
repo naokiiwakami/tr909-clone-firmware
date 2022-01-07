@@ -15,6 +15,37 @@
 #define SET_BIT(port, bit) (port) |= _BV(bit)
 #define CLEAR_BIT(port, bit) (port) &= ~_BV(bit)
 
+/**
+ * Places PCM value for hi-hat. The value is reflected to the output
+ * port immediately but it is not propagated to the external DAC until
+ * The latch bit is turned on.
+ * The two LSBs of the value must be zeros. The function does not check
+ * it for execution speed, so the caller must take care of clearing the
+ * two LSBs.
+ */
+inline static void PlaceHiHatPcmValue(uint8_t value) {
+  PORT_HI_HAT_PCM_VALUE = value;
+}
+
+/**
+ * Turns on the "PCM latch" bit to propagate the PCM value to the
+ * external ADC where the clock port is connected to the latch bit.
+ * The function turns on the latch bit but does not turn off by itself.
+ * Another function DoneCommitHiHatPcmValue() must be called explicitly
+ * afterwards.
+ */
+inline static void LatchHiHatPcmValue() {
+  PORT_HI_HAT_PCM_VALUE |= _BV(BIT_HI_HAT_PCM_LATCH);
+}
+
+/**
+ * Turns off the "PCM latch" bit. When CommitHiHatPcmValue() is called,
+ * this function must be called but no earlier than 3.5 microseconds.
+ */
+inline void UnlatchHiHatPcmValue() {
+  PORT_HI_HAT_PCM_VALUE &= ~_BV(BIT_HI_HAT_PCM_LATCH);
+}
+
 // Instruments
 rim_shot_t g_rim_shot;
 hi_hat_t g_hi_hat;
@@ -68,7 +99,7 @@ void SetUpTimer() {
   /*
    * Timer2
    */
-  // Timer2 is stopped in the initial state. See TurnOnPcmClock() and TurnOffPcmClock()
+  // Timer2 is stopped in the initial state. See StartPcmClock() and StopPcmClock()
   TCCR2 = 0;
   
   /*
@@ -78,12 +109,12 @@ void SetUpTimer() {
   TIMSK = _BV(TOIE2);
 }
 
-inline void TurnOnPcmClock() {
+inline void StartPcmClock() {
   // normal mode (WGM21, WGM20 = 00), no prescale (CS20)
   TCCR2 |= _BV(CS20);
 }
 
-inline void TurnOffPcmClock() {
+inline void StopPcmClock() {
   TCCR2 &= ~_BV(CS20);
 }
 
@@ -93,11 +124,11 @@ ISR(TIMER2_OVF_vect) {
     // TODO: Clearing the bit may not be necessary; Try removing this line.
     // The latch bit is actually the bit1 of the PCM PORT and setting the port
     // value from the wave table always clears the bit.
-    CLEAR_BIT(PORT_HI_HAT_PCM_VALUE, BIT_HI_HAT_PCM_LATCH);
+    UnlatchHiHatPcmValue();
     g_hi_hat.pcm_update_ready = 1;
   } else {
     // turn on the PCM latch bit
-    SET_BIT(PORT_HI_HAT_PCM_VALUE, BIT_HI_HAT_PCM_LATCH);
+   LatchHiHatPcmValue();
   }
   // switch the PCM phase
   g_hi_hat.pcm_phase ^= 1;
@@ -157,7 +188,7 @@ void TriggerOpenHiHat(int8_t velocity) {
   g_hi_hat.pcm_address_limit = ADDRESS_CLOSED_HI_HAT_START;
   g_hi_hat.pcm_phase = 0;
   g_hi_hat.pcm_update_ready = 0;
-  TurnOnPcmClock();
+  StartPcmClock();
 }
 
 void TriggerClosedHiHat(int8_t velocity) {
@@ -170,38 +201,7 @@ void TriggerClosedHiHat(int8_t velocity) {
   g_hi_hat.pcm_address_limit = ADDRESS_END;
   g_hi_hat.pcm_phase = 0;
   g_hi_hat.pcm_update_ready = 0;
-  TurnOnPcmClock();
-}
-
-/**
- * Places PCM value for hi-hat. The value is reflected to the output
- * port immediately but it is not propagated to the external DAC until
- * The latch bit is turned on.
- * The two LSBs of the value must be zeros. The function does not check
- * it for execution speed, so the caller must take care of clearing the
- * two LSBs.
- */
-inline void PlaceHiHatPcmValue(uint8_t value) {
-  PORT_HI_HAT_PCM_VALUE = value;
-}
-
-/**
- * Turns on the "PCM latch" bit to propagate the PCM value to the
- * external ADC where the clock port is connected to the latch bit.
- * The function turns on the latch bit but does not turn off by itself.
- * Another function DoneCommitHiHatPcmValue() must be called explicitly
- * afterwards.
- */
-inline void CommitHiHatPcmValue() {
-  PORT_HI_HAT_PCM_VALUE |= _BV(BIT_HI_HAT_PCM_LATCH);
-}
-
-/**
- * Turns off the "PCM latch" bit. When CommitHiHatPcmValue() is called,
- * this function must be called but no earlier than 3.5 microseconds.
- */
-inline void DoneCommitHiHatPcmValue() {
-  PORT_HI_HAT_PCM_VALUE &= ~_BV(BIT_HI_HAT_PCM_LATCH);
+  StartPcmClock();
 }
 
 void CheckInstruments() {
@@ -264,10 +264,10 @@ int main(void) {
     // Check the hi-hat PCM status
     if (g_hi_hat.pcm_update_ready) {
       if (g_hi_hat.pcm_address < g_hi_hat.pcm_address_limit) {
-        PORT_HI_HAT_PCM_VALUE = pgm_read_byte(&hi_hat_wav[g_hi_hat.pcm_address]);
+        PlaceHiHatPcmValue(pgm_read_byte(&hi_hat_wav[g_hi_hat.pcm_address]));
         ++g_hi_hat.pcm_address;
       } else {
-        TurnOffPcmClock();
+        StopPcmClock();
       }        
       g_hi_hat.pcm_update_ready = 0;
     }
