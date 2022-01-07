@@ -18,7 +18,8 @@ typedef struct hi_hat {
   uint8_t status;
   uint16_t pcm_address;
   uint16_t pcm_address_limit;  // PCM stops at this address
-  uint8_t pcm_value;  // TODO: Remove this. Only for testing.
+  uint8_t pcm_phase : 1; // 0 : update, 1: latch
+  uint8_t pcm_update_ready : 1;
 }
 hi_hat_t;
 

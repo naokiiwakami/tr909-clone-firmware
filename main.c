@@ -27,7 +27,8 @@ void InitializeInstruments() {
   g_hi_hat.status = 0;
   g_hi_hat.pcm_address = 0xffff;  // PCM runs when address < limit
   g_hi_hat.pcm_address_limit = 0;
-  g_hi_hat.pcm_value = 0;
+  g_hi_hat.pcm_phase = 0;
+  g_hi_hat.pcm_update_ready = 0;
 }
 
 /**
@@ -67,8 +68,8 @@ void SetUpTimer() {
   /*
    * Timer2
    */
-  // normal mode (WGM21, WGM20 = 00), no prescale (CS20)
-  TCCR2 = _BV(CS20);
+  // Timer2 is stopped in the initial state. See TurnOnPcmClock() and TurnOffPcmClock()
+  TCCR2 = 0;
   
   /*
    * Timer interrupts
@@ -77,8 +78,29 @@ void SetUpTimer() {
   TIMSK = _BV(TOIE2);
 }
 
+inline void TurnOnPcmClock() {
+  // normal mode (WGM21, WGM20 = 00), no prescale (CS20)
+  TCCR2 |= _BV(CS20);
+}
+
+inline void TurnOffPcmClock() {
+  TCCR2 &= ~_BV(CS20);
+}
+
 ISR(TIMER2_OVF_vect) {
-  PORTD ^= _BV(PD7); // toggle a test port
+  if (g_hi_hat.pcm_phase == 0) {
+    // turn off the PCM latch bit and notify the main program to update the PCM value
+    // TODO: Clearing the bit may not be necessary; Try removing this line.
+    // The latch bit is actually the bit1 of the PCM PORT and setting the port
+    // value from the wave table always clears the bit.
+    CLEAR_BIT(PORT_HI_HAT_PCM_VALUE, BIT_HI_HAT_PCM_LATCH);
+    g_hi_hat.pcm_update_ready = 1;
+  } else {
+    // turn on the PCM latch bit
+    SET_BIT(PORT_HI_HAT_PCM_VALUE, BIT_HI_HAT_PCM_LATCH);
+  }
+  // switch the PCM phase
+  g_hi_hat.pcm_phase ^= 1;
 }
 
 void SetUpIo() {
@@ -129,16 +151,26 @@ void TriggerOpenHiHat(int8_t velocity) {
   SET_BIT(PORT_TRIG_HI_HAT, BIT_TRIG_HI_HAT);
   SET_BIT(PORT_LED_OPEN_HI_HAT, BIT_LED_OPEN_HI_HAT);
   CLEAR_BIT(PORT_LED_CLOSED_HI_HAT, BIT_LED_CLOSED_HI_HAT);
-  CLEAR_BIT(PORT_SELECT_HI_HAT, BIT_SELECT_HI_HAT);
+  SET_BIT(PORT_SELECT_HI_HAT, BIT_SELECT_HI_HAT);
   g_hi_hat.status = 255;
+  g_hi_hat.pcm_address = 0;
+  g_hi_hat.pcm_address_limit = ADDRESS_CLOSED_HI_HAT_START;
+  g_hi_hat.pcm_phase = 0;
+  g_hi_hat.pcm_update_ready = 0;
+  TurnOnPcmClock();
 }
 
 void TriggerClosedHiHat(int8_t velocity) {
   SET_BIT(PORT_TRIG_HI_HAT, BIT_TRIG_HI_HAT);
   SET_BIT(PORT_LED_CLOSED_HI_HAT, BIT_LED_CLOSED_HI_HAT);
   CLEAR_BIT(PORT_LED_OPEN_HI_HAT, BIT_LED_OPEN_HI_HAT);
-  SET_BIT(PORT_SELECT_HI_HAT, BIT_SELECT_HI_HAT);
+  CLEAR_BIT(PORT_SELECT_HI_HAT, BIT_SELECT_HI_HAT);
   g_hi_hat.status = 255;
+  g_hi_hat.pcm_address = ADDRESS_CLOSED_HI_HAT_START;
+  g_hi_hat.pcm_address_limit = ADDRESS_END;
+  g_hi_hat.pcm_phase = 0;
+  g_hi_hat.pcm_update_ready = 0;
+  TurnOnPcmClock();
 }
 
 /**
@@ -175,30 +207,20 @@ inline void DoneCommitHiHatPcmValue() {
 void CheckInstruments() {
   if (g_rim_shot.status) {
     if (--g_rim_shot.status == TRIGGER_SHUTDOWN_AT) {
-      PORT_TRIG_RIM_SHOT &= ~_BV(BIT_TRIG_RIM_SHOT);
+      CLEAR_BIT(PORT_TRIG_RIM_SHOT, BIT_TRIG_RIM_SHOT);
     } else if (g_rim_shot.status == 0) {
-      PORT_LED_RIM_SHOT &= ~_BV(BIT_LED_RIM_SHOT);
+      CLEAR_BIT(PORT_LED_RIM_SHOT, BIT_LED_RIM_SHOT);
     }
   }
   
   if (g_hi_hat.status) {
     if (--g_hi_hat.status == TRIGGER_SHUTDOWN_AT) {
-      PORT_TRIG_HI_HAT &= ~_BV(BIT_TRIG_HI_HAT);
+      CLEAR_BIT(PORT_TRIG_HI_HAT, BIT_TRIG_HI_HAT);
     } else if (g_hi_hat.status == 0) {      
-      PORT_LED_CLOSED_HI_HAT &= ~_BV(BIT_LED_CLOSED_HI_HAT);
-      PORT_LED_OPEN_HI_HAT &= ~_BV(BIT_LED_OPEN_HI_HAT);
+      CLEAR_BIT(PORT_LED_CLOSED_HI_HAT, BIT_LED_CLOSED_HI_HAT);
+      CLEAR_BIT(PORT_LED_OPEN_HI_HAT, BIT_LED_OPEN_HI_HAT);
     }
   }
-
-  // test hi-hat PCM
-  /*
-  if ((g_cycle_count & 0x1) == 1) {
-    DoneCommitHiHatPcmValue();
-    PlaceHiHatPcmValue(g_hi_hat.pcm_value++);
-  } else {
-    CommitHiHatPcmValue();    
-  }
-  */
 }
 
 void CheckSwitches(uint8_t prev_switches, uint8_t new_switches) {
@@ -207,6 +229,12 @@ void CheckSwitches(uint8_t prev_switches, uint8_t new_switches) {
   }
   if (IS_RIM_SHOT_ON(new_switches)) {
     TriggerRimShort(127);
+  }
+  if (IS_OPEN_HI_HAT_ON(new_switches)) {
+    TriggerOpenHiHat(127);
+  }
+  if (IS_CLOSED_HI_HAT_ON(new_switches)) {
+    TriggerClosedHiHat(127);
   }
 }
 
@@ -217,6 +245,7 @@ int main(void) {
   volatile uint8_t prev_timer_value = 0;
   volatile uint8_t prev_switches = PORT_SWITCHES;
   while (1) {
+    // Check the master app clock
     uint8_t current_timer_value = TCNT0;
     if (current_timer_value < prev_timer_value) {
       ++g_divider;
@@ -231,6 +260,17 @@ int main(void) {
       }
     }
     prev_timer_value = current_timer_value;
+    
+    // Check the hi-hat PCM status
+    if (g_hi_hat.pcm_update_ready) {
+      if (g_hi_hat.pcm_address < g_hi_hat.pcm_address_limit) {
+        PORT_HI_HAT_PCM_VALUE = pgm_read_byte(&hi_hat_wav[g_hi_hat.pcm_address]);
+        ++g_hi_hat.pcm_address;
+      } else {
+        TurnOffPcmClock();
+      }        
+      g_hi_hat.pcm_update_ready = 0;
+    }
   }
 }
 
