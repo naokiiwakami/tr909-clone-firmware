@@ -144,7 +144,7 @@ ISR(TIMER2_OVF_vect) {
 }
 
 void SetUpIo() {
-  // PORTA -- TBD
+  // PORTA -- Hi-Hat PCM data and latch
   DDRA = 0xff;
   PORTA = 0;
  
@@ -167,8 +167,8 @@ void SetUpIo() {
   DDRF = 0;
   PORTF = 0;
   
-  // PORT G -- TBD
-  DDRG = 0;
+  // PORT G -- Noise and test pins
+  DDRG = 0xff;
   PORTG = 0;
 }
 
@@ -259,6 +259,8 @@ int main(void) {
   // uint32_t count = 0;
   volatile uint8_t prev_timer_value = 0;
   volatile uint8_t prev_switches = PORT_SWITCHES;
+  volatile uint8_t noise_clock = 0;
+  volatile uint32_t noise_register = ~0;
   while (1) {
     // Check the master app clock
     uint8_t current_timer_value = TCNT0;
@@ -275,6 +277,25 @@ int main(void) {
       }
     }
     prev_timer_value = current_timer_value;
+
+    /*
+     * Noise generator
+     *
+     * Noise generator is updated every 8 Timer0 increments - about 250 kHz
+     */
+    current_timer_value >>= 3;
+    if (current_timer_value != noise_clock) {
+      uint8_t temp = (noise_register >> 12) & 1;
+      temp ^= (noise_register >> 30) & 1;
+      if (temp) {
+        SetBit(PORT_NOISE, BIT_NOISE);
+      } else {
+        ClearBit(PORT_NOISE, BIT_NOISE);
+      }
+      noise_register <<= 1;
+      noise_register += temp;
+    }
+    noise_clock = current_timer_value & 0x1f;
     
     // Check the hi-hat PCM status
     if (g_hi_hat.pcm_update_ready) {

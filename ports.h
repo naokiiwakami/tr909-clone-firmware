@@ -150,5 +150,7 @@
  *  PG3 out Noise
  *  PG4 --- TEST
  */
+#define PORT_NOISE PORTG
+#define BIT_NOISE PG3
 
 #endif /* PORTS_H_ */
