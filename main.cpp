@@ -295,7 +295,7 @@ int main(void) {
       noise_register <<= 1;
       noise_register += temp;
     }
-    noise_clock = current_timer_value & 0x1f;
+    noise_clock = current_timer_value;
     
     // Check the hi-hat PCM status
     if (g_hi_hat.pcm_update_ready) {
