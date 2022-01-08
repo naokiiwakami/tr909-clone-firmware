@@ -3,8 +3,8 @@
 
 #include <avr/pgmspace.h>
 
-#define ADDRESS_CLOSED_HI_HAT_START 0x6040
-#define ADDRESS_END 32767
+static constexpr const int ADDRESS_CLOSED_HI_HAT_START = 0x6040;
+static constexpr const int ADDRESS_END = 32767;
 
 const uint8_t hi_hat_wav[ADDRESS_END] PROGMEM = {
   /* 0x00 */  0x80, 0x80, 0x7c, 0x94, 0x80, 0x70, 0x74, 0x6c, 0x90, 0x68, 0x78, 0x80, 0x84, 0x7c, 0x84, 0x80,

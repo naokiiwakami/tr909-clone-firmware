@@ -78,16 +78,6 @@
 #define PORT_SW_DIN_MUTE PORT_SWITCHES
 #define BIT_SW_DIN_MUTE  PINC7
 
-#define IS_SWITCH_ON(buffer, bit) (((buffer) & _BV(bit)) == 0)
-#define IS_SHIFT_ON(buffer) IS_SWITCH_ON(buffer, BIT_SW_SHIFT)
-#define IS_OPEN_HI_HAT_ON(buffer) IS_SWITCH_ON(buffer, BIT_SW_OPEN_HI_HAT)
-#define IS_CLOSED_HI_HAT_ON(buffer) IS_SWITCH_ON(buffer, BIT_SW_CLOSED_HI_HAT)
-#define IS_HAND_CLAP_ON(buffer) IS_SWITCH_ON(buffer, BIT_SW_HAND_CLAP)
-#define IS_RIM_SHOT_ON(buffer) IS_SWITCH_ON(buffer, BIT_SW_RIM_SHOT)
-#define IS_SNARE_DRUM_ON(buffer) IS_SWITCH_ON(buffer, BIT_SW_SNARE_DRUM)
-#define IS_BASS_DRUM_ON(buffer) IS_SWITCH_ON(buffer, BIT_SW_BASS_DRUM)
-#define IS_DIN_MUTE_ON(buffer) IS_SWITCH_ON(buffer, BIT_SW_DIN_MUTE)
- 
 /*
  *  PD0 out Trigger Rim Shot
  *  PD1 out Trigger Hand Clap

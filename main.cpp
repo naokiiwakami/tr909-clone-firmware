@@ -1,7 +1,7 @@
 /*
- * NewFirmware.c
+ * tr909_clone_firmware.cpp
  *
- * Created: 12/25/2021 10:30:43 AM
+ * Created: 1/7/2022 8:00:11 PM
  * Author : naoki
  */ 
 
@@ -12,8 +12,17 @@
 #include "ports.h"
 #include "hi_hat_wav.h"
 
-#define SET_BIT(port, bit) (port) |= _BV(bit)
-#define CLEAR_BIT(port, bit) (port) &= ~_BV(bit)
+inline static void SetBit(volatile uint8_t& port, const uint8_t bit) {
+  port |= _BV(bit);
+}
+
+inline static void ClearBit(volatile uint8_t& port, const uint8_t bit) {
+  port &= ~_BV(bit);
+}
+
+inline static void ToggleBit(volatile uint8_t& port, const uint8_t bit) {
+  port ^= _BV(bit);
+}
 
 /**
  * Places PCM value for hi-hat. The value is reflected to the output
@@ -170,56 +179,68 @@ void SetUp() {
   sei();
 }
 
-#define TRIGGER_SHUTDOWN_AT (255 - 16)  // 2.048 ms
+static constexpr uint16_t TRIGGER_SHUTDOWN_AT = (255 - 16);  // 2.048 ms
 
-void TriggerRimShort(int8_t velocity) {
-  SET_BIT(PORT_TRIG_RIM_SHOT, BIT_TRIG_RIM_SHOT);
-  SET_BIT(PORT_LED_RIM_SHOT, BIT_LED_RIM_SHOT);
+// Triggering Rim Shot
+void TriggerRimShot(int8_t velocity) {
+  SetBit(PORT_TRIG_RIM_SHOT, BIT_TRIG_RIM_SHOT);
+  SetBit(PORT_LED_RIM_SHOT, BIT_LED_RIM_SHOT);
   g_rim_shot.status = 255;
 }
 
-void TriggerOpenHiHat(int8_t velocity) {
-  SET_BIT(PORT_TRIG_HI_HAT, BIT_TRIG_HI_HAT);
-  SET_BIT(PORT_LED_OPEN_HI_HAT, BIT_LED_OPEN_HI_HAT);
-  CLEAR_BIT(PORT_LED_CLOSED_HI_HAT, BIT_LED_CLOSED_HI_HAT);
-  SET_BIT(PORT_SELECT_HI_HAT, BIT_SELECT_HI_HAT);
+// Triggering Hi-Hats
+template <void (*OpenHiHatLedFunc)(volatile uint8_t&, const uint8_t),
+          void (*ClosedHiHatLedFunc)(volatile uint8_t&, const uint8_t),
+          void (*HiHatSelectFunc)(volatile uint8_t&, const uint8_t),
+          uint16_t pcm_start, uint16_t pcm_end>
+void TriggerHiHat(int8_t velocity) {
+  SetBit(PORT_TRIG_HI_HAT, BIT_TRIG_HI_HAT);
+  OpenHiHatLedFunc(PORT_LED_OPEN_HI_HAT, BIT_LED_OPEN_HI_HAT);
+  ClosedHiHatLedFunc(PORT_LED_CLOSED_HI_HAT, BIT_LED_CLOSED_HI_HAT);
+  HiHatSelectFunc(PORT_SELECT_HI_HAT, BIT_SELECT_HI_HAT);
   g_hi_hat.status = 255;
-  g_hi_hat.pcm_address = 0;
-  g_hi_hat.pcm_address_limit = ADDRESS_CLOSED_HI_HAT_START;
+  g_hi_hat.pcm_address = pcm_start;
+  g_hi_hat.pcm_address_limit = pcm_end;
   g_hi_hat.pcm_phase = 0;
   g_hi_hat.pcm_update_ready = 0;
   StartPcmClock();
 }
 
-void TriggerClosedHiHat(int8_t velocity) {
-  SET_BIT(PORT_TRIG_HI_HAT, BIT_TRIG_HI_HAT);
-  SET_BIT(PORT_LED_CLOSED_HI_HAT, BIT_LED_CLOSED_HI_HAT);
-  CLEAR_BIT(PORT_LED_OPEN_HI_HAT, BIT_LED_OPEN_HI_HAT);
-  CLEAR_BIT(PORT_SELECT_HI_HAT, BIT_SELECT_HI_HAT);
-  g_hi_hat.status = 255;
-  g_hi_hat.pcm_address = ADDRESS_CLOSED_HI_HAT_START;
-  g_hi_hat.pcm_address_limit = ADDRESS_END;
-  g_hi_hat.pcm_phase = 0;
-  g_hi_hat.pcm_update_ready = 0;
-  StartPcmClock();
+inline void TriggerOpenHiHat(int8_t velocity) {
+  TriggerHiHat<SetBit, ClearBit, SetBit, 0, ADDRESS_CLOSED_HI_HAT_START>(velocity);
+}
+
+inline void TriggerClosedHiHat(int8_t velocity) {
+  TriggerHiHat<ClearBit, SetBit, ClearBit, ADDRESS_CLOSED_HI_HAT_START, ADDRESS_END>(velocity);
 }
 
 void CheckInstruments() {
   if (g_rim_shot.status) {
     if (--g_rim_shot.status == TRIGGER_SHUTDOWN_AT) {
-      CLEAR_BIT(PORT_TRIG_RIM_SHOT, BIT_TRIG_RIM_SHOT);
+      ClearBit(PORT_TRIG_RIM_SHOT, BIT_TRIG_RIM_SHOT);
     } else if (g_rim_shot.status == 0) {
-      CLEAR_BIT(PORT_LED_RIM_SHOT, BIT_LED_RIM_SHOT);
+      ClearBit(PORT_LED_RIM_SHOT, BIT_LED_RIM_SHOT);
     }
   }
   
   if (g_hi_hat.status) {
     if (--g_hi_hat.status == TRIGGER_SHUTDOWN_AT) {
-      CLEAR_BIT(PORT_TRIG_HI_HAT, BIT_TRIG_HI_HAT);
+      ClearBit(PORT_TRIG_HI_HAT, BIT_TRIG_HI_HAT);
     } else if (g_hi_hat.status == 0) {      
-      CLEAR_BIT(PORT_LED_CLOSED_HI_HAT, BIT_LED_CLOSED_HI_HAT);
-      CLEAR_BIT(PORT_LED_OPEN_HI_HAT, BIT_LED_OPEN_HI_HAT);
+      ClearBit(PORT_LED_CLOSED_HI_HAT, BIT_LED_CLOSED_HI_HAT);
+      ClearBit(PORT_LED_OPEN_HI_HAT, BIT_LED_OPEN_HI_HAT);
     }
+  }
+}
+
+inline bool IsSwitchOn(uint8_t switch_bit) {
+  return (PORT_SWITCHES & _BV(switch_bit)) == 0;
+}
+
+template <void (*TriggerFunc)(int8_t)>
+void CheckSwitch(uint8_t switch_bit, int8_t velocity) {
+  if (IsSwitchOn(switch_bit)) {
+    TriggerFunc(velocity);
   }
 }
 
@@ -227,15 +248,9 @@ void CheckSwitches(uint8_t prev_switches, uint8_t new_switches) {
   if ((prev_switches ^ new_switches) == 0) {
     return;
   }
-  if (IS_RIM_SHOT_ON(new_switches)) {
-    TriggerRimShort(127);
-  }
-  if (IS_OPEN_HI_HAT_ON(new_switches)) {
-    TriggerOpenHiHat(127);
-  }
-  if (IS_CLOSED_HI_HAT_ON(new_switches)) {
-    TriggerClosedHiHat(127);
-  }
+  CheckSwitch<TriggerRimShot>(BIT_SW_RIM_SHOT, 127);
+  CheckSwitch<TriggerOpenHiHat>(BIT_SW_OPEN_HI_HAT, 127);
+  CheckSwitch<TriggerClosedHiHat>(BIT_SW_CLOSED_HI_HAT, 127);
 }
 
 int main(void) {
@@ -256,7 +271,7 @@ int main(void) {
         prev_switches = current_switches;
       }
       if ((g_divider & 0xFFF) == 0) { // every 0.5 seconds
-        PORT_LED_DIN_MUTE ^= _BV(BIT_LED_DIN_MUTE);
+        ToggleBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
       }
     }
     prev_timer_value = current_timer_value;
@@ -273,4 +288,3 @@ int main(void) {
     }
   }
 }
-
