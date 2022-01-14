@@ -56,10 +56,14 @@ inline void UnlatchHiHatPcmValue() {
 }
 
 // Instruments
+bass_drum_t g_bass_drum;
 rim_shot_t g_rim_shot;
 hi_hat_t g_hi_hat;
 
 void InitializeInstruments() {
+  // bass drum
+  g_bass_drum.status = 0;
+
   // rim shot
   g_rim_shot.status = 0;
   
@@ -100,10 +104,27 @@ void SetUpTimer() {
    * Timer0
    */
   // 8-bit timer, 1/8 prescale = 128 micro second interval (CS01)
-  // Fast non-inverting PWM (WGM01 +_ WGM00 + COM01 + COM00)
-  TCCR0 = _BV(WGM01) | _BV(WGM00) | _BV(COM01) | _BV(COM00) | _BV(CS01);
+  // Fast non-inverting PWM (WGM01 +_ WGM00 + COM01)
+  TCCR0 = _BV(WGM01) | _BV(WGM00) | _BV(COM01) | _BV(CS01);
   OCR0 = 127;
   g_divider = 0;
+  
+  /*
+   * Timer1
+   */
+  // 1/8 prescale (CS11)
+  // 8-bit Fast non-inverting PWM A, B, & C (WGM12 + WGM10 + COM1A1 + COMB1 + COMC1)
+  TCCR1A = _BV(WGM10) | _BV(COM1A1) | _BV(COM1B1) | _BV(COM1C1);
+  TCCR1B =  _BV(WGM12) | _BV(CS11);
+  // clear high values of output compare registers
+  OCR1AH = 0;
+  OCR1BH = 0;
+  OCR1CH = 0;
+  // put middle values to tune registers
+  REGISTER_TUNE_SNARE_DRUM = 128;
+  REGISTER_TUNE_BASS_DRUM = 0;
+  // put maximum value to the velocity register
+  REGISTER_VELOCITY_BASS_DRUM = 255;
   
   /*
    * Timer2
@@ -181,6 +202,13 @@ void SetUp() {
 
 static constexpr uint16_t TRIGGER_SHUTDOWN_AT = (255 - 16);  // 2.048 ms
 
+// Triggering Bass Drum
+void TriggerBassDrum(int8_t velocity) {
+  SetBit(PORT_TRIG_BASS_DRUM, BIT_TRIG_BASS_DRUM);
+  SetBit(PORT_LED_BASS_DRUM, BIT_LED_BASS_DRUM);
+  g_bass_drum.status = 255;
+}
+
 // Triggering Rim Shot
 void TriggerRimShot(int8_t velocity) {
   SetBit(PORT_TRIG_RIM_SHOT, BIT_TRIG_RIM_SHOT);
@@ -215,10 +243,18 @@ inline void TriggerClosedHiHat(int8_t velocity) {
 }
 
 void CheckInstruments() {
+  if (g_bass_drum.status) {
+    if (--g_bass_drum.status == TRIGGER_SHUTDOWN_AT) {
+      ClearBit(PORT_TRIG_BASS_DRUM, BIT_TRIG_BASS_DRUM);
+    } else if (g_bass_drum.status == 0) {
+      ClearBit(PORT_LED_BASS_DRUM, BIT_LED_BASS_DRUM);
+    }
+  }
+  
   if (g_rim_shot.status) {
     if (--g_rim_shot.status == TRIGGER_SHUTDOWN_AT) {
       ClearBit(PORT_TRIG_RIM_SHOT, BIT_TRIG_RIM_SHOT);
-    } else if (g_rim_shot.status == 0) {
+      } else if (g_rim_shot.status == 0) {
       ClearBit(PORT_LED_RIM_SHOT, BIT_LED_RIM_SHOT);
     }
   }
@@ -233,13 +269,10 @@ void CheckInstruments() {
   }
 }
 
-inline bool IsSwitchOn(uint8_t switch_bit) {
-  return (PORT_SWITCHES & _BV(switch_bit)) == 0;
-}
-
 template <void (*TriggerFunc)(int8_t)>
-void CheckSwitch(uint8_t switch_bit, int8_t velocity) {
-  if (IsSwitchOn(switch_bit)) {
+void CheckSwitch(uint8_t prev_switches, uint8_t new_switches, uint8_t switch_bit,
+                 int8_t velocity) {
+  if ((prev_switches & _BV(switch_bit)) && !(new_switches & _BV(switch_bit))) {
     TriggerFunc(velocity);
   }
 }
@@ -248,9 +281,10 @@ void CheckSwitches(uint8_t prev_switches, uint8_t new_switches) {
   if ((prev_switches ^ new_switches) == 0) {
     return;
   }
-  CheckSwitch<TriggerRimShot>(BIT_SW_RIM_SHOT, 127);
-  CheckSwitch<TriggerOpenHiHat>(BIT_SW_OPEN_HI_HAT, 127);
-  CheckSwitch<TriggerClosedHiHat>(BIT_SW_CLOSED_HI_HAT, 127);
+  CheckSwitch<TriggerBassDrum>(prev_switches, new_switches, BIT_SW_BASS_DRUM, 127);
+  CheckSwitch<TriggerRimShot>(prev_switches, new_switches, BIT_SW_RIM_SHOT, 127);
+  CheckSwitch<TriggerOpenHiHat>(prev_switches, new_switches, BIT_SW_OPEN_HI_HAT, 127);
+  CheckSwitch<TriggerClosedHiHat>(prev_switches, new_switches, BIT_SW_CLOSED_HI_HAT, 127);
 }
 
 int main(void) {

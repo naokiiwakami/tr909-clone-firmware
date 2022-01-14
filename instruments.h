@@ -9,6 +9,11 @@
 #ifndef INSTRUMENTS_H_
 #define INSTRUMENTS_H_
 
+typedef struct bass_drum {
+  uint8_t status;
+}
+bass_drum_t;
+
 typedef struct rim_shot {
   uint8_t status;
 }
