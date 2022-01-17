@@ -14,6 +14,11 @@ typedef struct bass_drum {
 }
 bass_drum_t;
 
+typedef struct snare_drum {
+  uint8_t status;
+}
+snare_drum_t;
+
 typedef struct rim_shot {
   uint8_t status;
 }

@@ -57,12 +57,16 @@ inline void UnlatchHiHatPcmValue() {
 
 // Instruments
 bass_drum_t g_bass_drum;
+snare_drum_t g_snare_drum;
 rim_shot_t g_rim_shot;
 hi_hat_t g_hi_hat;
 
 void InitializeInstruments() {
   // bass drum
   g_bass_drum.status = 0;
+
+  // snare drum
+  g_snare_drum.status = 0;
 
   // rim shot
   g_rim_shot.status = 0;
@@ -108,6 +112,7 @@ void SetUpTimer() {
   TCCR0 = _BV(WGM01) | _BV(WGM00) | _BV(COM01) | _BV(CS01);
   OCR0 = 127;
   g_divider = 0;
+  REGISTER_VELOCITY_SNARE_DRUM = 255;
   
   /*
    * Timer1
@@ -121,8 +126,8 @@ void SetUpTimer() {
   OCR1BH = 0;
   OCR1CH = 0;
   // put middle values to tune registers
-  REGISTER_TUNE_SNARE_DRUM = 128;
-  REGISTER_TUNE_BASS_DRUM = 0;
+  REGISTER_TUNE_SNARE_DRUM = 64;
+  REGISTER_TUNE_BASS_DRUM = 128;
   // put maximum value to the velocity register
   REGISTER_VELOCITY_BASS_DRUM = 255;
   
@@ -209,6 +214,13 @@ void TriggerBassDrum(int8_t velocity) {
   g_bass_drum.status = 255;
 }
 
+// Triggering Bass Drum
+void TriggerSnareDrum(int8_t velocity) {
+  SetBit(PORT_TRIG_SNARE_DRUM, BIT_TRIG_SNARE_DRUM);
+  SetBit(PORT_LED_SNARE_DRUM, BIT_LED_SNARE_DRUM);
+  g_snare_drum.status = 255;
+}
+
 // Triggering Rim Shot
 void TriggerRimShot(int8_t velocity) {
   SetBit(PORT_TRIG_RIM_SHOT, BIT_TRIG_RIM_SHOT);
@@ -242,33 +254,6 @@ inline void TriggerClosedHiHat(int8_t velocity) {
   TriggerHiHat<ClearBit, SetBit, ClearBit, ADDRESS_CLOSED_HI_HAT_START, ADDRESS_END>(velocity);
 }
 
-void CheckInstruments() {
-  if (g_bass_drum.status) {
-    if (--g_bass_drum.status == TRIGGER_SHUTDOWN_AT) {
-      ClearBit(PORT_TRIG_BASS_DRUM, BIT_TRIG_BASS_DRUM);
-    } else if (g_bass_drum.status == 0) {
-      ClearBit(PORT_LED_BASS_DRUM, BIT_LED_BASS_DRUM);
-    }
-  }
-  
-  if (g_rim_shot.status) {
-    if (--g_rim_shot.status == TRIGGER_SHUTDOWN_AT) {
-      ClearBit(PORT_TRIG_RIM_SHOT, BIT_TRIG_RIM_SHOT);
-      } else if (g_rim_shot.status == 0) {
-      ClearBit(PORT_LED_RIM_SHOT, BIT_LED_RIM_SHOT);
-    }
-  }
-  
-  if (g_hi_hat.status) {
-    if (--g_hi_hat.status == TRIGGER_SHUTDOWN_AT) {
-      ClearBit(PORT_TRIG_HI_HAT, BIT_TRIG_HI_HAT);
-    } else if (g_hi_hat.status == 0) {      
-      ClearBit(PORT_LED_CLOSED_HI_HAT, BIT_LED_CLOSED_HI_HAT);
-      ClearBit(PORT_LED_OPEN_HI_HAT, BIT_LED_OPEN_HI_HAT);
-    }
-  }
-}
-
 template <void (*TriggerFunc)(int8_t)>
 void CheckSwitch(uint8_t prev_switches, uint8_t new_switches, uint8_t switch_bit,
                  int8_t velocity) {
@@ -282,9 +267,48 @@ void CheckSwitches(uint8_t prev_switches, uint8_t new_switches) {
     return;
   }
   CheckSwitch<TriggerBassDrum>(prev_switches, new_switches, BIT_SW_BASS_DRUM, 127);
+  CheckSwitch<TriggerSnareDrum>(prev_switches, new_switches, BIT_SW_SNARE_DRUM, 127);
   CheckSwitch<TriggerRimShot>(prev_switches, new_switches, BIT_SW_RIM_SHOT, 127);
   CheckSwitch<TriggerOpenHiHat>(prev_switches, new_switches, BIT_SW_OPEN_HI_HAT, 127);
   CheckSwitch<TriggerClosedHiHat>(prev_switches, new_switches, BIT_SW_CLOSED_HI_HAT, 127);
+}
+
+template<typename InstrumentT>
+inline void CheckInstrument(InstrumentT* instrument,
+                            volatile uint8_t& trig_port, const uint8_t trig_bit,
+                            volatile uint8_t& led_port, const uint8_t led_bit) {
+  if (instrument->status) {
+    if (--instrument->status == TRIGGER_SHUTDOWN_AT) {
+      ClearBit(trig_port, trig_bit);
+    } else if (instrument->status == 0) {
+      ClearBit(led_port, led_bit);
+    }
+  } 
+}
+
+void CheckInstruments() {
+  CheckInstrument(&g_bass_drum, PORT_TRIG_BASS_DRUM, BIT_TRIG_BASS_DRUM,
+                  PORT_LED_BASS_DRUM, BIT_LED_BASS_DRUM);
+
+  CheckInstrument(&g_snare_drum, PORT_TRIG_SNARE_DRUM, BIT_TRIG_SNARE_DRUM,
+                  PORT_LED_SNARE_DRUM, BIT_LED_SNARE_DRUM);
+
+  if (g_rim_shot.status) {
+    if (--g_rim_shot.status == TRIGGER_SHUTDOWN_AT) {
+      ClearBit(PORT_TRIG_RIM_SHOT, BIT_TRIG_RIM_SHOT);
+      } else if (g_rim_shot.status == 0) {
+      ClearBit(PORT_LED_RIM_SHOT, BIT_LED_RIM_SHOT);
+    }
+  }
+  
+  if (g_hi_hat.status) {
+    if (--g_hi_hat.status == TRIGGER_SHUTDOWN_AT) {
+      ClearBit(PORT_TRIG_HI_HAT, BIT_TRIG_HI_HAT);
+      } else if (g_hi_hat.status == 0) {
+      ClearBit(PORT_LED_CLOSED_HI_HAT, BIT_LED_CLOSED_HI_HAT);
+      ClearBit(PORT_LED_OPEN_HI_HAT, BIT_LED_OPEN_HI_HAT);
+    }
+  }
 }
 
 int main(void) {
