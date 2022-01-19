@@ -59,6 +59,7 @@ inline void UnlatchHiHatPcmValue() {
 bass_drum_t g_bass_drum;
 snare_drum_t g_snare_drum;
 rim_shot_t g_rim_shot;
+hand_clap_t g_hand_clap;
 hi_hat_t g_hi_hat;
 
 void InitializeInstruments() {
@@ -70,6 +71,9 @@ void InitializeInstruments() {
 
   // rim shot
   g_rim_shot.status = 0;
+  
+  // hand clap
+  g_hand_clap.status = 0;
   
   // hi-hat
   g_hi_hat.status = 0;
@@ -118,7 +122,7 @@ void SetUpTimer() {
    * Timer1
    */
   // 1/8 prescale (CS11)
-  // 8-bit Fast non-inverting PWM A, B, & C (WGM12 + WGM10 + COM1A1 + COMB1 + COMC1)
+  // 8-bit Fast non-inverting PWM A, B, & C (WGM12 + WGM10 + COM1A1 + COM1B1 + COM1C1)
   TCCR1A = _BV(WGM10) | _BV(COM1A1) | _BV(COM1B1) | _BV(COM1C1);
   TCCR1B =  _BV(WGM12) | _BV(CS11);
   // clear high values of output compare registers
@@ -136,6 +140,22 @@ void SetUpTimer() {
    */
   // Timer2 is stopped in the initial state. See StartPcmClock() and StopPcmClock()
   TCCR2 = 0;
+  
+  /*
+   * Timer3
+   */
+  // 1/8 prescale (CS31)
+  // 8-bit Fast non-inverting PWM A, B, & C (WGM32 + WGM30 + COM3A1 + COM3B1 + CO3MC1)
+  TCCR3A = _BV(WGM30) | _BV(COM3A1) | _BV(COM3B1) | _BV(COM3C1);
+  TCCR3B =  _BV(WGM32) | _BV(CS31);
+  // clear high values of output compare registers
+  OCR3AH = 0;
+  OCR3BH = 0;
+  OCR3CH = 0;
+  // put maximum value to the velocity registers
+  REGISTER_VELOCITY_HI_HAT = 255;
+  REGISTER_VELOCITY_RIM_SHOT = 255;
+  REGISTER_VELOCITY_HAND_CLAP = 64;
   
   /*
    * Timer interrupts
@@ -179,7 +199,7 @@ void SetUpIo() {
   DDRE = 0xff;
   PORTB = 0;
   // Set velocities to maximum temporarily
-  PORTE = _BV(BIT_PWM_VELOCITY_RIM_SHOT) | _BV(BIT_PWM_VELOCITY_HI_HAT);
+  // PORTE = _BV(BIT_PWM_VELOCITY_RIM_SHOT) | _BV(BIT_PWM_VELOCITY_HI_HAT);
   
   // PORT C -- all switches
   DDRC = 0;
@@ -207,25 +227,28 @@ void SetUp() {
 
 static constexpr uint16_t TRIGGER_SHUTDOWN_AT = (255 - 16);  // 2.048 ms
 
-// Triggering Bass Drum
 void TriggerBassDrum(int8_t velocity) {
   SetBit(PORT_TRIG_BASS_DRUM, BIT_TRIG_BASS_DRUM);
   SetBit(PORT_LED_BASS_DRUM, BIT_LED_BASS_DRUM);
   g_bass_drum.status = 255;
 }
 
-// Triggering Bass Drum
 void TriggerSnareDrum(int8_t velocity) {
   SetBit(PORT_TRIG_SNARE_DRUM, BIT_TRIG_SNARE_DRUM);
   SetBit(PORT_LED_SNARE_DRUM, BIT_LED_SNARE_DRUM);
   g_snare_drum.status = 255;
 }
 
-// Triggering Rim Shot
 void TriggerRimShot(int8_t velocity) {
   SetBit(PORT_TRIG_RIM_SHOT, BIT_TRIG_RIM_SHOT);
   SetBit(PORT_LED_RIM_SHOT, BIT_LED_RIM_SHOT);
   g_rim_shot.status = 255;
+}
+
+void TriggerHandClap(int8_t velocity) {
+  SetBit(PORT_TRIG_HAND_CLAP, BIT_TRIG_HAND_CLAP);
+  SetBit(PORT_LED_HAND_CLAP, BIT_LED_HAND_CLAP);
+  g_hand_clap.status = 255;
 }
 
 // Triggering Hi-Hats
@@ -269,6 +292,7 @@ void CheckSwitches(uint8_t prev_switches, uint8_t new_switches) {
   CheckSwitch<TriggerBassDrum>(prev_switches, new_switches, BIT_SW_BASS_DRUM, 127);
   CheckSwitch<TriggerSnareDrum>(prev_switches, new_switches, BIT_SW_SNARE_DRUM, 127);
   CheckSwitch<TriggerRimShot>(prev_switches, new_switches, BIT_SW_RIM_SHOT, 127);
+  CheckSwitch<TriggerHandClap>(prev_switches, new_switches, BIT_SW_HAND_CLAP, 127);
   CheckSwitch<TriggerOpenHiHat>(prev_switches, new_switches, BIT_SW_OPEN_HI_HAT, 127);
   CheckSwitch<TriggerClosedHiHat>(prev_switches, new_switches, BIT_SW_CLOSED_HI_HAT, 127);
 }
@@ -293,14 +317,12 @@ void CheckInstruments() {
   CheckInstrument(&g_snare_drum, PORT_TRIG_SNARE_DRUM, BIT_TRIG_SNARE_DRUM,
                   PORT_LED_SNARE_DRUM, BIT_LED_SNARE_DRUM);
 
-  if (g_rim_shot.status) {
-    if (--g_rim_shot.status == TRIGGER_SHUTDOWN_AT) {
-      ClearBit(PORT_TRIG_RIM_SHOT, BIT_TRIG_RIM_SHOT);
-      } else if (g_rim_shot.status == 0) {
-      ClearBit(PORT_LED_RIM_SHOT, BIT_LED_RIM_SHOT);
-    }
-  }
-  
+  CheckInstrument(&g_rim_shot, PORT_TRIG_RIM_SHOT, BIT_TRIG_RIM_SHOT,
+                  PORT_LED_RIM_SHOT, BIT_LED_RIM_SHOT);
+
+  CheckInstrument(&g_hand_clap, PORT_TRIG_HAND_CLAP, BIT_TRIG_HAND_CLAP,
+                  PORT_LED_HAND_CLAP, BIT_LED_HAND_CLAP);
+
   if (g_hi_hat.status) {
     if (--g_hi_hat.status == TRIGGER_SHUTDOWN_AT) {
       ClearBit(PORT_TRIG_HI_HAT, BIT_TRIG_HI_HAT);

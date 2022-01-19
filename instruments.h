@@ -24,6 +24,11 @@ typedef struct rim_shot {
 }
 rim_shot_t;
 
+typedef struct hand_clap {
+  uint8_t status;
+}
+hand_clap_t;
+
 typedef struct hi_hat {
   uint8_t status;
   uint16_t pcm_address;
