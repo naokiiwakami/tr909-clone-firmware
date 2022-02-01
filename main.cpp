@@ -88,22 +88,23 @@ void InitializeInstruments() {
  * The Timer0 rotation happens with:
  *   clock=16e6 / timer_top=256 / prescale=8 = 7812.5 Hz
  * Then the divider bits give following frequencies (LSB -> MSB)
- *  0 : 3906.3
- *  1 : 1953.1
- *  2 :  976.3
- *  3 :  488.3
- *  4 :  244.1
- *  5 :  122.1
- *  6 :   61.0
- *  7 :   30.5
- *  8 :   15.3
- *  9 :    7.6
- * 10 :    3.8
- * 11 :    1.9
- * 12 :    0.95
- * 13 :    0.48
- * 14 :    0.23
- * 15 :    0.12
+ * bits  freq (Hz) interval
+ *  0  : 3906.3      256 us
+ *  1  : 1953.1      512 us
+ *  2  :  976.3     1.02 ms
+ *  3  :  488.3     2.05 ms
+ *  4  :  244.1     4.10 ms
+ *  5  :  122.1     8.19 ms
+ *  6  :   61.0     16.4 ms
+ *  7  :   30.5     32.8 ms
+ *  8  :   15.3     65.5 ms
+ *  9  :    7.6      131 ms
+ * 10  :    3.8      262 ms
+ * 11  :    1.9      524 ms
+ * 12  :    0.95    1.05 s
+ * 13  :    0.48    2.10 s
+ * 14  :    0.23    4.19 s
+ * 15  :    0.12    8.39 s
  */
 uint16_t g_divider;
 
@@ -198,8 +199,6 @@ void SetUpIo() {
   DDRB = 0xff;
   DDRE = 0xff;
   PORTB = 0;
-  // Set velocities to maximum temporarily
-  // PORTE = _BV(BIT_PWM_VELOCITY_RIM_SHOT) | _BV(BIT_PWM_VELOCITY_HI_HAT);
   
   // PORT C -- all switches
   DDRC = 0;
@@ -209,7 +208,7 @@ void SetUpIo() {
   DDRD = ~_BV(BIT_MIDI_IN); // only MIDI-in is input
   PORTD = _BV(BIT_MIDI_IN);
   
-  // PORT F -- TBD
+  // PORT F -- All input (ADC)
   DDRF = 0;
   PORTF = 0;
   
@@ -218,10 +217,39 @@ void SetUpIo() {
   PORTG = 0;
 }
 
+uint8_t g_adc_current_channel = 0;
+bool g_adc_ready_to_read = false;
+
+void SetUpAdc() {
+  g_adc_current_channel = ADMUX_HI_HAT;
+  /*
+   * ADC Multiplexer Selection Register
+   */
+  // voltage reference: AREF (REFS = 00)
+  // ADC Left Adjust Result: off (ADLAR = 0)
+  // Channel is set f| or hi-hat (ADC0)
+  ADMUX = g_adc_current_channel;
+
+  /*
+   * ADC Control and Status Register A
+   */
+  ADCSRA = _BV(ADEN)  // ADC ENable
+    // | _BV(ADSC)    // ADC Start Conversion
+    // | _BV(ADATE)   // ADC Auto Trigger Enable
+    // | _BV(ADIF)    // ADC Interrupt Flag
+    // | _BV(ADIE)    // ADC Interrupt Enable
+    | _BV(ADPS2)      // ADC Prescaler Select Bits. '111' is 128 that gives 125 kHz for 16MHz clock
+    | _BV(ADPS1)
+    | _BV(ADPS0);
+
+    g_adc_ready_to_read = false;
+}
+
 void SetUp() {
   InitializeInstruments();
   SetUpTimer();
   SetUpIo();
+  SetUpAdc();
   sei();
 }
 
@@ -333,6 +361,32 @@ void CheckInstruments() {
   }
 }
 
+void HandleAdc() {
+  if (!g_adc_ready_to_read) {
+    // set the next ADC channel
+    ADMUX &= 0xF0;
+    ADMUX |= g_adc_current_channel;
+    // start ADC
+    ADCSRA |= _BV(ADSC);
+    g_adc_ready_to_read = true;  // the value would be read in the next cycle
+  } else if ((ADCSRA & _BV(ADSC)) == 0) {
+    uint8_t adc_value = ADC >> 2;
+    switch (g_adc_current_channel) {
+     case ADMUX_HI_HAT:
+      // TODO: Change hi-hat clock speed
+      break;
+     case ADMUX_SNARE_DRUM:
+      REGISTER_TUNE_SNARE_DRUM = adc_value;
+      break;
+     case ADMUX_BASS_DRUM:
+      REGISTER_TUNE_BASS_DRUM = adc_value;
+      break;
+    }
+    g_adc_ready_to_read = false;
+    g_adc_current_channel = (g_adc_current_channel + 1) % ADMUX_NUM_CHANNELS;
+  }
+}
+
 int main(void) {
   SetUp();
   /* Replace with your application code */
@@ -351,6 +405,10 @@ int main(void) {
       if ((g_divider & 0x3f) == 0) { // every 64 cycles = 8ms
         CheckSwitches(prev_switches, current_switches);
         prev_switches = current_switches;
+
+        if ((g_divider & 0x7f) == 0) { // every 128 cycles = 16ms
+          HandleAdc();
+        }
       }
       if ((g_divider & 0xFFF) == 0) { // every 0.5 seconds
         ToggleBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);

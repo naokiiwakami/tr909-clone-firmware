@@ -136,15 +136,21 @@
 #define REGISTER_VELOCITY_HAND_CLAP OCR3CL
  
 /*
- *  PF0 in  AD Hi-Hat Tune
- *  PF1 in  AD Snare Drum Tune
- *  PF2 in  AD Bass Drum Tune
+ *  PF0 in  AD Hi-Hat Tune      ADC0
+ *  PF1 in  AD Snare Drum Tune  ADC1
+ *  PF2 in  AD Bass Drum Tune   ADC2
  *  PF3 --- TEST
  *  PF4 TCK
  *  PF5 TMS
  *  PF6 TDO
  *  PF7 TDI
- *
+ */
+static constexpr uint8_t ADMUX_HI_HAT = 0;  // ADC0
+static constexpr uint8_t ADMUX_SNARE_DRUM = _BV(MUX0);  // ADC1
+static constexpr uint8_t ADMUX_BASS_DRUM = _BV(MUX1);  // ADC2
+static constexpr uint8_t ADMUX_NUM_CHANNELS = 3;
+
+/*
  *  PG0 --- TEST
  *  PG1 --- TEST
  *  PG2 --- TEST
