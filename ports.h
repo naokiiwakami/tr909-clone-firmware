@@ -3,8 +3,7 @@
  *
  * Created: 1/1/2022 11:42:47 AM
  *  Author: naoki
- */ 
-
+ */
 
 #ifndef PORTS_H_
 #define PORTS_H_
@@ -59,26 +58,26 @@
  */
 #define PORT_SWITCHES PINC
 #define PORT_SW_SHIFT PORT_SWITCHES
-#define BIT_SW_SHIFT  PINC0
+#define BIT_SW_SHIFT PINC0
 #define PORT_SW_OPEN_HI_HAT PORT_SWITCHES
-#define BIT_SW_OPEN_HI_HAT  PINC1
+#define BIT_SW_OPEN_HI_HAT PINC1
 #define PORT_SW_CLOSED_HI_HAT PORT_SWITCHES
-#define BIT_SW_CLOSED_HI_HAT  PINC2
+#define BIT_SW_CLOSED_HI_HAT PINC2
 #define PORT_SW_HAND_CLAP PORT_SWITCHES
-#define BIT_SW_HAND_CLAP  PINC3
+#define BIT_SW_HAND_CLAP PINC3
 #define PORT_SW_RIM_SHOT PORT_SWITCHES
-#define BIT_SW_RIM_SHOT  PINC4
+#define BIT_SW_RIM_SHOT PINC4
 #define PORT_SW_SNARE_DRUM PORT_SWITCHES
-#define BIT_SW_SNARE_DRUM  PINC5
+#define BIT_SW_SNARE_DRUM PINC5
 #define PORT_SW_BASS_DRUM PORT_SWITCHES
-#define BIT_SW_BASS_DRUM  PINC6
+#define BIT_SW_BASS_DRUM PINC6
 #define PORT_SW_DIN_MUTE PORT_SWITCHES
-#define BIT_SW_DIN_MUTE  PINC7
+#define BIT_SW_DIN_MUTE PINC7
 
 /*
  *  PD0 out Trigger Rim Shot
  *  PD1 out Trigger Hand Clap
- *  PD2 in  MIDI IN 
+ *  PD2 in  MIDI IN
  *  PD3 out Trigger Hi-Hat
  *  PD4 out Trigger Snare Drum
  *  PD5 out Hi-Hat Select
@@ -87,23 +86,23 @@
  */
 
 #define PORT_TRIG_RIM_SHOT PORTD
-#define BIT_TRIG_RIM_SHOT  PD0
+#define BIT_TRIG_RIM_SHOT PD0
 #define PORT_TRIG_HAND_CLAP PORTD
-#define BIT_TRIG_HAND_CLAP  PD1
+#define BIT_TRIG_HAND_CLAP PD1
 
 #define PORT_MIDI_IN PIND
-#define BIT_MIDI_IN  PIND2
+#define BIT_MIDI_IN PIND2
 
 #define PORT_TRIG_HI_HAT PORTD
-#define BIT_TRIG_HI_HAT  PD3
+#define BIT_TRIG_HI_HAT PD3
 #define PORT_TRIG_SNARE_DRUM PORTD
-#define BIT_TRIG_SNARE_DRUM  PD4
+#define BIT_TRIG_SNARE_DRUM PD4
 #define PORT_SELECT_HI_HAT PORTD
-#define BIT_SELECT_HI_HAT  PD5
+#define BIT_SELECT_HI_HAT PD5
 #define PORT_TRIG_BASS_DRUM PORTD
-#define BIT_TRIG_BASS_DRUM  PD6
+#define BIT_TRIG_BASS_DRUM PD6
 
- /*
+/*
  *  PE0 out LED Rim Shot
  *  PE1 out LED Closed Hi-Hat
  *  PE2 out LED Hand Clap
@@ -115,11 +114,11 @@
  */
 
 #define PORT_LED_RIM_SHOT PORTE
-#define BIT_LED_RIM_SHOT  PE0
+#define BIT_LED_RIM_SHOT PE0
 #define PORT_LED_CLOSED_HI_HAT PORTE
-#define BIT_LED_CLOSED_HI_HAT  PE1
+#define BIT_LED_CLOSED_HI_HAT PE1
 #define PORT_LED_HAND_CLAP PORTE
-#define BIT_LED_HAND_CLAP  PE2
+#define BIT_LED_HAND_CLAP PE2
 // #define PORT_PWM_VELOCITY_HI_HAT PORTE
 // #define BIT_PWM_VELOCITY_HI_HAT  PE3
 // #define PORT_PWM_VELOCITY_RIM_SHOT PORTE
@@ -127,14 +126,14 @@
 // #define PORT_PWM_VELOCITY_HAND_CLAP PORTE
 // #define BIT_PWM_VELOCITY_HAND_CLAP  PE5
 #define PORT_LED_SNARE_DRUM PORTE
-#define BIT_LED_SNARE_DRUM  PE6
+#define BIT_LED_SNARE_DRUM PE6
 #define PORT_LED_BASS_DRUM PORTE
-#define BIT_LED_BASS_DRUM  PE7
+#define BIT_LED_BASS_DRUM PE7
 
 #define REGISTER_VELOCITY_HI_HAT OCR3AL
 #define REGISTER_VELOCITY_RIM_SHOT OCR3BL
 #define REGISTER_VELOCITY_HAND_CLAP OCR3CL
- 
+
 /*
  *  PF0 in  AD Hi-Hat Tune      ADC0
  *  PF1 in  AD Snare Drum Tune  ADC1
@@ -145,9 +144,9 @@
  *  PF6 TDO
  *  PF7 TDI
  */
-static constexpr uint8_t ADMUX_HI_HAT = 0;  // ADC0
+static constexpr uint8_t ADMUX_HI_HAT = 0;              // ADC0
 static constexpr uint8_t ADMUX_SNARE_DRUM = _BV(MUX0);  // ADC1
-static constexpr uint8_t ADMUX_BASS_DRUM = _BV(MUX1);  // ADC2
+static constexpr uint8_t ADMUX_BASS_DRUM = _BV(MUX1);   // ADC2
 static constexpr uint8_t ADMUX_NUM_CHANNELS = 3;
 
 /*
