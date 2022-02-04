@@ -3,7 +3,7 @@
  *
  * Created: 1/1/2022 1:11:57 PM
  *  Author: naoki
- */ 
+ */
 
 
 #ifndef INSTRUMENTS_H_
@@ -35,6 +35,13 @@ typedef struct hi_hat {
   uint16_t pcm_address_limit;  // PCM stops at this address
   uint8_t pcm_phase : 1;  // 0 : update, 1: latch
   uint8_t pcm_update_ready : 1;
+  
+  /*
+   * Timer2 management for hi-hat tone control
+   */
+  // TCNT2 value to set by the Timer2 overflow interrupt handler.
+  // Starting with 0 gives the slowest PCM clock, which gets faster as the value increases.
+  uint8_t tcnt2_on_overflow;
 }
 hi_hat_t;
 

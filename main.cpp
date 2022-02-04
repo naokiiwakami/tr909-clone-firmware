@@ -12,6 +12,15 @@
 #include "ports.h"
 #include "hi_hat_wav.h"
 
+// Instruments /////////////////////////////////////
+bass_drum_t g_bass_drum;
+snare_drum_t g_snare_drum;
+rim_shot_t g_rim_shot;
+hand_clap_t g_hand_clap;
+hi_hat_t g_hi_hat;
+
+// Utilities ///////////////////////////////////////
+
 inline static void SetBit(volatile uint8_t& port, const uint8_t bit) {
   port |= _BV(bit);
 }
@@ -22,6 +31,14 @@ inline static void ClearBit(volatile uint8_t& port, const uint8_t bit) {
 
 inline static void ToggleBit(volatile uint8_t& port, const uint8_t bit) {
   port ^= _BV(bit);
+}
+
+/**
+ * Sets Timer2 management configuration for a hi-hat tune value.
+ * The range of tune value is 1024 / 16 = 64.
+ */
+inline static void SetHiHatTune(uint8_t tune) {
+  g_hi_hat.tcnt2_on_overflow = tune + 168;
 }
 
 /**
@@ -55,12 +72,7 @@ inline void UnlatchHiHatPcmValue() {
   PORT_HI_HAT_PCM_VALUE &= ~_BV(BIT_HI_HAT_PCM_LATCH);
 }
 
-// Instruments
-bass_drum_t g_bass_drum;
-snare_drum_t g_snare_drum;
-rim_shot_t g_rim_shot;
-hand_clap_t g_hand_clap;
-hi_hat_t g_hi_hat;
+// Initializers //////////////////////////////////////////
 
 void InitializeInstruments() {
   // bass drum
@@ -81,6 +93,7 @@ void InitializeInstruments() {
   g_hi_hat.pcm_address_limit = 0;
   g_hi_hat.pcm_phase = 0;
   g_hi_hat.pcm_update_ready = 0;
+  SetHiHatTune(128);  // middle
 }
 
 /**
@@ -166,12 +179,12 @@ void SetUpTimer() {
 }
 
 inline void StartPcmClock() {
-  // normal mode (WGM21, WGM20 = 00), no prescale (CS20)
-  TCCR2 |= _BV(CS20);
+  // normal mode (WGM21, WGM20 = 00), 1/8 prescale (CS21)
+  TCCR2 = _BV(CS21);
 }
 
 inline void StopPcmClock() {
-  TCCR2 &= ~_BV(CS20);
+  TCCR2 = 0;
 }
 
 ISR(TIMER2_OVF_vect) {
@@ -188,6 +201,9 @@ ISR(TIMER2_OVF_vect) {
   }
   // switch the PCM phase
   g_hi_hat.pcm_phase ^= 1;
+  
+  // Set the Timer2 counter the start value
+  TCNT2 = g_hi_hat.tcnt2_on_overflow;
 }
 
 void SetUpIo() {
@@ -216,6 +232,8 @@ void SetUpIo() {
   DDRG = 0xff;
   PORTG = 0;
 }
+
+// Instrument control functions /////////////////////////////////////////////////
 
 uint8_t g_adc_current_channel = 0;
 bool g_adc_ready_to_read = false;
@@ -370,16 +388,15 @@ void HandleAdc() {
     ADCSRA |= _BV(ADSC);
     g_adc_ready_to_read = true;  // the value would be read in the next cycle
   } else if ((ADCSRA & _BV(ADSC)) == 0) {
-    uint8_t adc_value = ADC >> 2;
     switch (g_adc_current_channel) {
      case ADMUX_HI_HAT:
-      // TODO: Change hi-hat clock speed
+      SetHiHatTune(ADC >> 4);
       break;
      case ADMUX_SNARE_DRUM:
-      REGISTER_TUNE_SNARE_DRUM = adc_value;
+      REGISTER_TUNE_SNARE_DRUM = (ADC >> 4) + 38;  // 38 to 102, CV range about 0.7V to 2V
       break;
      case ADMUX_BASS_DRUM:
-      REGISTER_TUNE_BASS_DRUM = adc_value;
+      REGISTER_TUNE_BASS_DRUM = (ADC >> 2); // CV rail to rail, range 0V to 5V
       break;
     }
     g_adc_ready_to_read = false;
@@ -390,7 +407,6 @@ void HandleAdc() {
 int main(void) {
   SetUp();
   /* Replace with your application code */
-  // uint32_t count = 0;
   volatile uint8_t prev_timer_value = 0;
   volatile uint8_t prev_switches = PORT_SWITCHES;
   volatile uint8_t noise_clock = 0;
