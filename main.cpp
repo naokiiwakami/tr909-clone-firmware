@@ -12,12 +12,45 @@
 #include "instruments.h"
 #include "ports.h"
 
+// System clock frequency
+static constexpr uint32_t F_OSC = 16000000;  // 16 MHz
+
 // Instruments /////////////////////////////////////
 bass_drum_t g_bass_drum;
 snare_drum_t g_snare_drum;
 rim_shot_t g_rim_shot;
 hand_clap_t g_hand_clap;
 hi_hat_t g_hi_hat;
+
+// MIDI ////////////////////////////////////////////
+static constexpr uint32_t USART_BAUD_RATE = 31250;
+static constexpr uint8_t USART_BUF_SIZE = 16;  // must be power of 2
+static constexpr uint16_t USART_BAUD_SELECT = (F_OSC / (USART_BAUD_RATE * 16) - 1);
+
+struct MidiMessage {
+  uint8_t status = 0;
+  uint8_t channel = 0;
+  uint8_t data[2] = {0, 0};
+  uint8_t data_length_mask = 0;
+  uint8_t data_pointer = 0;
+
+  MidiMessage() {}
+};
+
+static MidiMessage g_midi_message;
+
+static constexpr uint8_t MIDI_NOTE_OFF = 0x80;
+static constexpr uint8_t MIDI_NOTE_ON = 0x90;
+static constexpr uint8_t MIDI_CONTROL_CHANGE = 0xb0;
+static constexpr uint8_t MIDI_PROGRAM_CHANGE = 0xc0;
+static constexpr uint8_t MIDI_CHANNEL_PRESSURE = 0xd0;
+
+static constexpr uint8_t MIDI_NOTE_BASS_DRUM = 36;      // C1
+static constexpr uint8_t MIDI_NOTE_SNARE_DRUM = 38;     // D1
+static constexpr uint8_t MIDI_NOTE_RIM_SHOT = 37;       // C#1
+static constexpr uint8_t MIDI_NOTE_HAND_CLAP = 39;      // D#1
+static constexpr uint8_t MIDI_NOTE_CLOSED_HI_HAT = 42;  // F#1
+static constexpr uint8_t MIDI_NOTE_OPEN_HI_HAT = 46;    // A#1
 
 // Utilities ///////////////////////////////////////
 
@@ -206,7 +239,7 @@ void SetUpIo() {
 
   // PORT D
   DDRD = ~_BV(BIT_MIDI_IN);  // only MIDI-in is input
-  PORTD = _BV(BIT_MIDI_IN);
+  PORTD = _BV(BIT_MIDI_IN);  // pull up
 
   // PORT F -- All input (ADC)
   DDRF = 0;
@@ -249,35 +282,52 @@ void SetUpAdc() {
   g_adc_ready_to_read = false;
 }
 
+void SetUpUsart() {
+  // Set baud rate
+  UBRR1H = static_cast<uint8_t>((USART_BAUD_SELECT >> 8) & 0xff);
+  UBRR1L = static_cast<uint8_t>(USART_BAUD_SELECT & 0xff);
+
+  // Enable receiver
+  UCSR1B = _BV(RXEN1);
+
+  // Set frame format: asynchronous operation, parity disabled, 8 data, 1 stop bit */
+  UCSR1C = _BV(UCSZ11) | _BV(UCSZ10);
+}
+
 void SetUp() {
   InitializeInstruments();
   SetUpTimer();
   SetUpIo();
   SetUpAdc();
+  SetUpUsart();
   sei();
 }
 
 static constexpr uint16_t TRIGGER_SHUTDOWN_AT = (255 - 16);  // 2.048 ms
 
 void TriggerBassDrum(int8_t velocity) {
+  REGISTER_VELOCITY_BASS_DRUM = velocity << 1;
   SetBit(PORT_TRIG_BASS_DRUM, BIT_TRIG_BASS_DRUM);
   SetBit(PORT_LED_BASS_DRUM, BIT_LED_BASS_DRUM);
   g_bass_drum.status = 255;
 }
 
 void TriggerSnareDrum(int8_t velocity) {
+  REGISTER_VELOCITY_SNARE_DRUM = velocity << 1;
   SetBit(PORT_TRIG_SNARE_DRUM, BIT_TRIG_SNARE_DRUM);
   SetBit(PORT_LED_SNARE_DRUM, BIT_LED_SNARE_DRUM);
   g_snare_drum.status = 255;
 }
 
 void TriggerRimShot(int8_t velocity) {
+  REGISTER_VELOCITY_RIM_SHOT = velocity << 1;
   SetBit(PORT_TRIG_RIM_SHOT, BIT_TRIG_RIM_SHOT);
   SetBit(PORT_LED_RIM_SHOT, BIT_LED_RIM_SHOT);
   g_rim_shot.status = 255;
 }
 
 void TriggerHandClap(int8_t velocity) {
+  REGISTER_VELOCITY_HAND_CLAP = velocity;
   SetBit(PORT_TRIG_HAND_CLAP, BIT_TRIG_HAND_CLAP);
   SetBit(PORT_LED_HAND_CLAP, BIT_LED_HAND_CLAP);
   g_hand_clap.status = 255;
@@ -289,6 +339,7 @@ template <void (*OpenHiHatLedFunc)(volatile uint8_t&, const uint8_t),
           void (*HiHatSelectFunc)(volatile uint8_t&, const uint8_t), uint16_t pcm_start,
           uint16_t pcm_end>
 void TriggerHiHat(int8_t velocity) {
+  REGISTER_VELOCITY_HI_HAT = velocity + 128;
   SetBit(PORT_TRIG_HI_HAT, BIT_TRIG_HI_HAT);
   OpenHiHatLedFunc(PORT_LED_OPEN_HI_HAT, BIT_LED_OPEN_HI_HAT);
   ClosedHiHatLedFunc(PORT_LED_CLOSED_HI_HAT, BIT_LED_CLOSED_HI_HAT);
@@ -389,6 +440,67 @@ void HandleAdc() {
   }
 }
 
+// MIDI parser /////////////////////////////////////////
+static void ProcessMidiMessage();
+
+void ParseMidiInput(uint8_t next_byte) {
+  if (next_byte >= 0xf0) {
+    // TODO: Handle the system-common or system-realtime message
+    return;
+  }
+  if (next_byte > 0x7f) {  // is status byte
+    g_midi_message.status = next_byte & 0xf0;
+    g_midi_message.channel = next_byte & 0x0f;
+    switch (g_midi_message.status) {
+      case MIDI_PROGRAM_CHANGE:
+      case MIDI_CHANNEL_PRESSURE:
+        g_midi_message.data_length_mask = 0;
+        break;
+      default:
+        g_midi_message.data_length_mask = 1;
+    }
+    g_midi_message.data_pointer = 0;
+  } else {  // data byte
+    g_midi_message.data[g_midi_message.data_pointer & 0x1] = next_byte;
+    if ((++g_midi_message.data_pointer & g_midi_message.data_length_mask) == 0) {
+      ProcessMidiMessage();
+    }
+  }
+}
+
+void ProcessMidiMessage() {
+  switch (g_midi_message.status) {
+    case MIDI_NOTE_ON: {
+      auto& velocity = g_midi_message.data[1];
+      if (velocity == 0) {
+        // this is actually a note-off message
+        break;
+      }
+      auto& note = g_midi_message.data[0];
+      switch (note) {
+        case MIDI_NOTE_BASS_DRUM:
+          TriggerBassDrum(velocity);
+          break;
+        case MIDI_NOTE_SNARE_DRUM:
+          TriggerSnareDrum(velocity);
+          break;
+        case MIDI_NOTE_RIM_SHOT:
+          TriggerRimShot(velocity);
+          break;
+        case MIDI_NOTE_HAND_CLAP:
+          TriggerHandClap(velocity);
+          break;
+        case MIDI_NOTE_CLOSED_HI_HAT:
+          TriggerClosedHiHat(velocity);
+          break;
+        case MIDI_NOTE_OPEN_HI_HAT:
+          TriggerOpenHiHat(velocity);
+          break;
+      }
+    } break;
+  }
+}
+
 int main(void) {
   SetUp();
   /* Replace with your application code */
@@ -397,6 +509,11 @@ int main(void) {
   volatile uint8_t noise_clock = 0;
   volatile uint32_t noise_register = ~0;
   while (1) {
+    // Check MIDI input
+    while (UCSR1A & _BV(RXC1)) {
+      ParseMidiInput(UDR1);
+    }
+
     // Check the master app clock
     uint8_t current_timer_value = TCNT0;
     if (current_timer_value < prev_timer_value) {
