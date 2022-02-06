@@ -38,6 +38,7 @@ struct MidiMessage {
 };
 
 static MidiMessage g_midi_message;
+static uint8_t g_midi_channel;
 
 static constexpr uint8_t MIDI_NOTE_OFF = 0x80;
 static constexpr uint8_t MIDI_NOTE_ON = 0x90;
@@ -250,8 +251,6 @@ void SetUpIo() {
   PORTG = 0;
 }
 
-// Instrument control functions /////////////////////////////////////////////////
-
 uint8_t g_adc_current_channel = 0;
 bool g_adc_ready_to_read = false;
 
@@ -282,7 +281,7 @@ void SetUpAdc() {
   g_adc_ready_to_read = false;
 }
 
-void SetUpUsart() {
+void SetupMidi() {
   // Set baud rate
   UBRR1H = static_cast<uint8_t>((USART_BAUD_SELECT >> 8) & 0xff);
   UBRR1L = static_cast<uint8_t>(USART_BAUD_SELECT & 0xff);
@@ -292,16 +291,26 @@ void SetUpUsart() {
 
   // Set frame format: asynchronous operation, parity disabled, 8 data, 1 stop bit */
   UCSR1C = _BV(UCSZ11) | _BV(UCSZ10);
+
+  // TODO: Read from eeprom
+  g_midi_channel = 0;
 }
+
+void StartupSequence() {}
 
 void SetUp() {
   InitializeInstruments();
   SetUpTimer();
   SetUpIo();
   SetUpAdc();
-  SetUpUsart();
+  SetupMidi();
+
+  StartupSequence();
+
   sei();
 }
+
+// Instrument control functions /////////////////////////////////////////////////
 
 static constexpr uint16_t TRIGGER_SHUTDOWN_AT = (255 - 16);  // 2.048 ms
 
@@ -441,7 +450,7 @@ void HandleAdc() {
 }
 
 // MIDI parser /////////////////////////////////////////
-static void ProcessMidiMessage();
+static void ProcessMidiChannelMessage();
 
 void ParseMidiInput(uint8_t next_byte) {
   if (next_byte >= 0xf0) {
@@ -463,12 +472,14 @@ void ParseMidiInput(uint8_t next_byte) {
   } else {  // data byte
     g_midi_message.data[g_midi_message.data_pointer & 0x1] = next_byte;
     if ((++g_midi_message.data_pointer & g_midi_message.data_length_mask) == 0) {
-      ProcessMidiMessage();
+      if (g_midi_message.channel == g_midi_channel) {
+        ProcessMidiChannelMessage();
+      }
     }
   }
 }
 
-void ProcessMidiMessage() {
+void ProcessMidiChannelMessage() {
   switch (g_midi_message.status) {
     case MIDI_NOTE_ON: {
       auto& velocity = g_midi_message.data[1];
@@ -503,7 +514,7 @@ void ProcessMidiMessage() {
 
 int main(void) {
   SetUp();
-  /* Replace with your application code */
+
   volatile uint8_t prev_timer_value = 0;
   volatile uint8_t prev_switches = PORT_SWITCHES;
   volatile uint8_t noise_clock = 0;
