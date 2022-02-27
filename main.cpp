@@ -8,6 +8,7 @@
 #include <avr/interrupt.h>
 #include <avr/io.h>
 
+#include "eeprom.h"
 #include "hi_hat_wav.h"
 #include "instruments.h"
 #include "ports.h"
@@ -61,6 +62,14 @@ inline static void ClearBit(volatile uint8_t& port, const uint8_t bit) { port &=
 
 inline static void ToggleBit(volatile uint8_t& port, const uint8_t bit) { port ^= _BV(bit); }
 
+inline static void SetBit(volatile uint8_t& port, const uint8_t bit, bool onOrOff) {
+  if (onOrOff) {
+    SetBit(port, bit);
+  } else {
+    ClearBit(port, bit);
+  }
+}
+
 /**
  * Sets Timer2 management configuration for a hi-hat tune value.
  * The range of tune value is 1024 / 16 = 64.
@@ -93,6 +102,13 @@ inline static void LatchHiHatPcmValue() { PORT_HI_HAT_PCM_VALUE |= _BV(BIT_HI_HA
 inline void UnlatchHiHatPcmValue() { PORT_HI_HAT_PCM_VALUE &= ~_BV(BIT_HI_HAT_PCM_LATCH); }
 
 // Initializers //////////////////////////////////////////
+
+void InitializeEEPROM() {
+  if (eeprom_read_byte(E_MAGIC) != 0xa2) {
+    eeprom_write_byte(E_MIDI_CH, 0);
+    eeprom_write_byte(E_MAGIC, 0xa2);
+  }
+}
 
 void InitializeInstruments() {
   // bass drum
@@ -293,19 +309,64 @@ void SetupMidi() {
   UCSR1C = _BV(UCSZ11) | _BV(UCSZ10);
 
   // TODO: Read from eeprom
-  g_midi_channel = 0;
+  g_midi_channel = eeprom_read_byte(E_MIDI_CH);
 }
 
-void StartupSequence() {}
+/**
+ * Turn on/off LEDs as reflections of bits in the value.
+ */
+inline void MapToLed(uint8_t value) {
+  SetBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE, (value & 0x40) != 0);
+  SetBit(PORT_LED_BASS_DRUM, BIT_LED_BASS_DRUM, (value & 0x20) != 0);
+  SetBit(PORT_LED_SNARE_DRUM, BIT_LED_SNARE_DRUM, (value & 0x10) != 0);
+  SetBit(PORT_LED_RIM_SHOT, BIT_LED_RIM_SHOT, (value & 0x8) != 0);
+  SetBit(PORT_LED_HAND_CLAP, BIT_LED_HAND_CLAP, (value & 0x4) != 0);
+  SetBit(PORT_LED_CLOSED_HI_HAT, BIT_LED_CLOSED_HI_HAT, (value & 0x2) != 0);
+  SetBit(PORT_LED_OPEN_HI_HAT, BIT_LED_OPEN_HI_HAT, (value & 0x1) != 0);
+}
+
+void StartupSequence() {
+  volatile uint8_t prev_timer_value = 0;
+  uint8_t blink_left = 21;
+  uint8_t midi_indicator = 0x20 + (g_midi_channel << 1) + 0x1;
+  uint8_t led_value = 0x80;
+  while (blink_left > 0) {
+    uint8_t current_timer_value = TCNT0;
+    if (current_timer_value < prev_timer_value) {
+      ++g_divider;
+      if (blink_left == 21) {
+        if ((g_divider & 0x7f) == 0) {  // every 128 cycles = 16ms
+          MapToLed(led_value);
+          led_value >>= 1;
+          if (led_value == 0) {
+            led_value = midi_indicator;
+            --blink_left;
+          }
+        }
+      } else {
+        if ((g_divider & 0x7ff) == 0) {
+          MapToLed(led_value);
+          if (led_value >= 0x40) {
+            led_value = g_midi_channel + 1;
+          } else {
+            led_value = 0x40 + g_midi_channel + 1;
+          }
+          --blink_left;
+        }
+      }
+    }
+    prev_timer_value = current_timer_value;
+  }
+  MapToLed(0);
+}
 
 void SetUp() {
+  InitializeEEPROM();
   InitializeInstruments();
   SetUpTimer();
   SetUpIo();
   SetUpAdc();
   SetupMidi();
-
-  StartupSequence();
 
   sei();
 }
@@ -514,6 +575,8 @@ void ProcessMidiChannelMessage() {
 
 int main(void) {
   SetUp();
+
+  StartupSequence();
 
   volatile uint8_t prev_timer_value = 0;
   volatile uint8_t prev_switches = PORT_SWITCHES;
