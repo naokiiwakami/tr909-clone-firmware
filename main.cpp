@@ -325,10 +325,65 @@ inline void MapToLed(uint8_t value) {
   SetBit(PORT_LED_OPEN_HI_HAT, BIT_LED_OPEN_HI_HAT, (value & 0x1) != 0);
 }
 
+bool CheckSwitchesMidi(uint8_t prev_switches, uint8_t new_switches, uint8_t* midi_indicator) {
+  if ((prev_switches & _BV(BIT_SW_SNARE_DRUM)) && !(new_switches & _BV(BIT_SW_SNARE_DRUM))) {
+    if (*midi_indicator < 16) {
+      ++*midi_indicator;
+    }
+  }
+  if ((prev_switches & _BV(BIT_SW_RIM_SHOT)) && !(new_switches & _BV(BIT_SW_RIM_SHOT))) {
+    if (*midi_indicator > 1) {
+      --*midi_indicator;
+    }
+  }
+  if ((prev_switches & _BV(BIT_SW_DIN_MUTE)) && !(new_switches & _BV(BIT_SW_DIN_MUTE))) {
+    return true;
+  }
+  return false;
+}
+
+void SetUpMidi() {
+  uint8_t midi_indicator = g_midi_channel + 0x1;
+  volatile uint8_t prev_timer_value = 0;
+  volatile uint16_t divider = 0;
+  uint8_t led_value = 0;
+  uint8_t prev_switches = PORT_SWITCHES;
+  uint8_t countdown = 0;
+  while (true) {
+    uint8_t current_timer_value = TCNT0;
+    if (current_timer_value < prev_timer_value) {
+      ++divider;
+      if ((divider & 0xff) == 0) {  // every 256 cycles = 32ms
+        if (countdown == 0) {
+          uint8_t current_switches = PORT_SWITCHES;
+          if (CheckSwitchesMidi(prev_switches, current_switches, &midi_indicator)) {
+            MapToLed(midi_indicator);
+            g_midi_channel = midi_indicator - 1;
+            eeprom_write_byte(E_MIDI_CH, g_midi_channel);
+            countdown = 32;
+          } else {
+            MapToLed(led_value);
+            if (led_value == 0) {
+              led_value = midi_indicator;
+            } else {
+              led_value = 0;
+            }
+          }
+          prev_switches = current_switches;
+        } else if (--countdown == 0) {
+          break;
+        }
+      }
+    }
+    prev_timer_value = current_timer_value;
+  }
+  MapToLed(0);
+}
+
 void StartupSequence() {
   volatile uint8_t prev_timer_value = 0;
   uint8_t blink_left = 21;
-  uint8_t midi_indicator = 0x20 + (g_midi_channel << 1) + 0x1;
+  uint8_t midi_indicator = g_midi_channel + 0x1;
   uint8_t led_value = 0x80;
   while (blink_left > 0) {
     uint8_t current_timer_value = TCNT0;
@@ -347,9 +402,9 @@ void StartupSequence() {
         if ((g_divider & 0x7ff) == 0) {
           MapToLed(led_value);
           if (led_value >= 0x40) {
-            led_value = g_midi_channel + 1;
+            led_value = midi_indicator;
           } else {
-            led_value = 0x40 + g_midi_channel + 1;
+            led_value = 0x40 + midi_indicator;
           }
           --blink_left;
         }
@@ -431,9 +486,9 @@ inline void TriggerClosedHiHat(int8_t velocity) {
 }
 
 template <void (*TriggerFunc)(int8_t)>
-void CheckSwitch(uint8_t prev_switches, uint8_t new_switches, uint8_t switch_bit, int8_t velocity) {
+void CheckSwitch(uint8_t prev_switches, uint8_t new_switches, uint8_t switch_bit, int8_t param) {
   if ((prev_switches & _BV(switch_bit)) && !(new_switches & _BV(switch_bit))) {
-    TriggerFunc(velocity);
+    TriggerFunc(param);
   }
 }
 
@@ -576,7 +631,11 @@ void ProcessMidiChannelMessage() {
 int main(void) {
   SetUp();
 
-  StartupSequence();
+  if ((PORT_SW_BASS_DRUM & _BV(BIT_SW_BASS_DRUM)) == 0) {
+    SetUpMidi();
+  } else {
+    StartupSequence();
+  }
 
   volatile uint8_t prev_timer_value = 0;
   volatile uint8_t prev_switches = PORT_SWITCHES;
