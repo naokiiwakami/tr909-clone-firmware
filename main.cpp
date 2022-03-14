@@ -16,6 +16,10 @@
 // System clock frequency
 static constexpr uint32_t F_OSC = 16000000;  // 16 MHz
 
+// Sequencer ///////////////////////////////////////
+uint16_t g_tempo_wrap;
+uint16_t g_sequencer_position;
+
 // Instruments /////////////////////////////////////
 bass_drum_t g_bass_drum;
 snare_drum_t g_snare_drum;
@@ -137,25 +141,27 @@ void InitializeInstruments() {
  * The Timer0 rotation happens with:
  *   clock=16e6 / timer_top=256 / prescale=8 = 7812.5 Hz
  * Then the divider bits give following frequencies (LSB -> MSB)
- * bits  freq (Hz) interval
- *  0  : 3906.3      256 us
- *  1  : 1953.1      512 us
- *  2  :  976.3     1.02 ms
- *  3  :  488.3     2.05 ms
- *  4  :  244.1     4.10 ms
- *  5  :  122.1     8.19 ms
- *  6  :   61.0     16.4 ms
- *  7  :   30.5     32.8 ms
- *  8  :   15.3     65.5 ms
- *  9  :    7.6      131 ms
- * 10  :    3.8      262 ms
- * 11  :    1.9      524 ms
- * 12  :    0.95    1.05 s
- * 13  :    0.48    2.10 s
- * 14  :    0.23    4.19 s
- * 15  :    0.12    8.39 s
+ *
+ *       divider
+ * bits     mask  freq (Hz) interval
+ * ==================================
+ *  1  :     0x1  3906.3      256 us
+ *  2  :     0x3  1953.1      512 us
+ *  3  :     0x7   976.3     1.02 ms
+ *  4  :     0xf   488.3     2.05 ms
+ *  5  :    0x1f   244.1     4.10 ms
+ *  6  :    0x3f   122.1     8.19 ms
+ *  7  :    0x7f    61.0     16.4 ms
+ *  8  :    0xff    30.5     32.8 ms
+ *  9  :   0x1ff    15.3     65.5 ms
+ * 10  :   0x3ff     7.6      131 ms
+ * 11  :   0x7ff     3.8      262 ms
+ * 12  :   0xfff     1.9      524 ms
+ * 13  :  0x1fff     0.95    1.05 s
+ * 14  :  0x3fff     0.48    2.10 s
+ * 15  :  0x7fff     0.23    4.19 s
+ * 16  :  0xffff     0.12    8.39 s
  */
-uint16_t g_divider;
 
 void SetUpTimer() {
   /*
@@ -165,7 +171,6 @@ void SetUpTimer() {
   // Fast non-inverting PWM (WGM01 +_ WGM00 + COM01)
   TCCR0 = _BV(WGM01) | _BV(WGM00) | _BV(COM01) | _BV(CS01);
   OCR0 = 127;
-  g_divider = 0;
   REGISTER_VELOCITY_SNARE_DRUM = 255;
 
   /*
@@ -342,6 +347,14 @@ bool CheckSwitchesMidi(uint8_t prev_switches, uint8_t new_switches, uint8_t* mid
   return false;
 }
 
+/**
+ * A subroutine to be used for changing the MIDI channel.
+ *
+ * The mode starts with the current MIDI channel. The channel number is indicated
+ * as a binary number using the LEDs. Pressing the "snare drum" button increments the channel,
+ * while the "rim shot" button decrements it. Pressing the "DIN mute" button exits the mode.
+ * The MIDI channel is stored into the eeprom before leaving.
+ */
 void SetUpMidi() {
   uint8_t midi_indicator = g_midi_channel + 0x1;
   volatile uint8_t prev_timer_value = 0;
@@ -385,12 +398,13 @@ void StartupSequence() {
   uint8_t blink_left = 21;
   uint8_t midi_indicator = g_midi_channel + 0x1;
   uint8_t led_value = 0x80;
+  uint16_t divider = 0;
   while (blink_left > 0) {
     uint8_t current_timer_value = TCNT0;
     if (current_timer_value < prev_timer_value) {
-      ++g_divider;
+      ++divider;
       if (blink_left == 21) {
-        if ((g_divider & 0x7f) == 0) {  // every 128 cycles = 16ms
+        if ((divider & 0x7f) == 0) {  // every 128 cycles = 16ms
           MapToLed(led_value);
           led_value >>= 1;
           if (led_value == 0) {
@@ -399,7 +413,7 @@ void StartupSequence() {
           }
         }
       } else {
-        if ((g_divider & 0x7ff) == 0) {
+        if ((divider & 0x7ff) == 0) {
           MapToLed(led_value);
           if (led_value >= 0x40) {
             led_value = midi_indicator;
@@ -415,6 +429,12 @@ void StartupSequence() {
   MapToLed(0);
 }
 
+void InitializeSequencer() {
+  g_tempo_wrap = 450;
+  g_sequencer_position = 0;
+  SetBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
+}
+
 void SetUp() {
   InitializeEEPROM();
   InitializeInstruments();
@@ -422,6 +442,7 @@ void SetUp() {
   SetUpIo();
   SetUpAdc();
   SetupMidi();
+  InitializeSequencer();
 
   sei();
 }
@@ -485,6 +506,184 @@ inline void TriggerClosedHiHat(int8_t velocity) {
   TriggerHiHat<ClearBit, SetBit, ClearBit, ADDRESS_CLOSED_HI_HAT_START, ADDRESS_END>(velocity);
 }
 
+class Sequencer {
+ private:
+  uint8_t pattern_bass_drum_[32];
+  uint8_t acc_bass_drum_[32];
+  uint8_t pattern_snare_drum_[32];
+  uint8_t acc_snare_drum_[32];
+  uint8_t pattern_rim_shot_[32];
+  uint8_t acc_rim_shot_[32];
+  uint8_t pattern_hand_clap_[32];
+  uint8_t acc_hand_clap_[32];
+  uint8_t pattern_closed_hi_hat_[32];
+  uint8_t pattern_open_hi_hat_[32];
+  uint8_t acc_hi_hat_[32];
+
+  int16_t position_;
+
+  uint8_t state_;
+
+ public:
+  static constexpr uint8_t kStandBy = 0;
+  static constexpr uint8_t kRunning = 1;
+  static constexpr uint8_t kStopping = 2;
+
+  Sequencer() : position_{-1}, state_{kStandBy} {
+    // tentative initialization
+    for (int i = 0; i < 32; ++i) {
+      switch (i % 8) {
+        case 0:
+          pattern_bass_drum_[i] = 0x80;
+          acc_bass_drum_[i] = 0x80;
+          pattern_snare_drum_[i] = 0;
+          acc_snare_drum_[i] = 0;
+          pattern_closed_hi_hat_[i] = 0x88;
+          acc_hi_hat_[i] = 0x80;
+          break;
+        case 1:
+          pattern_bass_drum_[i] = 0x08;
+          acc_bass_drum_[i] = 0x0;
+          pattern_snare_drum_[i] = 0x80;
+          acc_snare_drum_[i] = 0x80;
+          pattern_closed_hi_hat_[i] = 0x88;
+          pattern_open_hi_hat_[i] = 0x0;
+          acc_hi_hat_[i] = 0x80;
+          break;
+        case 2:
+          pattern_bass_drum_[i] = 0x80;
+          acc_bass_drum_[i] = 0x80;
+          pattern_snare_drum_[i] = 0;
+          acc_snare_drum_[i] = 0;
+          pattern_closed_hi_hat_[i] = 0x88;
+          pattern_open_hi_hat_[i] = 0x0;
+          acc_hi_hat_[i] = 0x80;
+          break;
+        case 3:
+          pattern_bass_drum_[i] = 0x08;
+          acc_bass_drum_[i] = 0x08;
+          pattern_snare_drum_[i] = 0x80;
+          acc_snare_drum_[i] = 0x80;
+          pattern_closed_hi_hat_[i] = 0x88;
+          pattern_open_hi_hat_[i] = 0x0;
+          acc_hi_hat_[i] = 0x80;
+          break;
+        case 4:
+          pattern_bass_drum_[i] = 0x08;
+          acc_bass_drum_[i] = 0x08;
+          pattern_snare_drum_[i] = 0;
+          acc_snare_drum_[i] = 0;
+          pattern_snare_drum_[i] = 0;
+          acc_snare_drum_[i] = 0x0;
+          pattern_closed_hi_hat_[i] = 0x88;
+          pattern_open_hi_hat_[i] = 0x0;
+          acc_hi_hat_[i] = 0x80;
+          break;
+        case 5:
+          pattern_bass_drum_[i] = 0x08;
+          acc_bass_drum_[i] = 0x0;
+          pattern_snare_drum_[i] = 0x80;
+          acc_snare_drum_[i] = 0x80;
+          pattern_closed_hi_hat_[i] = 0x88;
+          pattern_open_hi_hat_[i] = 0x00;
+          acc_hi_hat_[i] = 0x80;
+          break;
+        case 6:
+          pattern_bass_drum_[i] = 0x80;
+          acc_bass_drum_[i] = 0x80;
+          pattern_snare_drum_[i] = 0x0;
+          acc_snare_drum_[i] = 0;
+          pattern_closed_hi_hat_[i] = 0x80;
+          pattern_open_hi_hat_[i] = 0x08;
+          acc_hi_hat_[i] = 0x88;
+          break;
+        case 7:
+          pattern_bass_drum_[i] = 0;
+          if (i / 8 == 3) {
+            pattern_snare_drum_[i] = 0x82;
+            pattern_closed_hi_hat_[i] = 0x80;
+            pattern_open_hi_hat_[i] = 0x08;
+            acc_hi_hat_[i] = 0x88;
+          } else {
+            pattern_snare_drum_[i] = 0x80;
+            pattern_closed_hi_hat_[i] = 0x88;
+            pattern_open_hi_hat_[i] = 0x0;
+            acc_hi_hat_[i] = 0x80;
+          }
+          acc_snare_drum_[i] = 0x80;
+          break;
+      }
+
+      pattern_rim_shot_[i] = 0;
+      pattern_hand_clap_[i] = 0;
+    }
+  }
+
+  inline void Start() { state_ = kRunning; }
+
+  inline void Stop() { state_ = kStopping; }
+
+  inline void Toggle() {
+    if (state_ == kStandBy) {
+      Start();
+    } else if (state_ == kRunning) {
+      Stop();
+    }
+  }
+
+  template <void (*TriggerFunc)(int8_t)>
+  inline void Check(uint8_t* pattern, uint8_t* accent, uint8_t index, uint8_t mask) {
+    if (pattern[index] & mask) {
+      TriggerFunc((accent[index] & mask) ? 127 : 63);
+    }
+  }
+
+  void Proceed() {
+    if (state_ == kStandBy) {
+      return;
+    }
+    if (++position_ == 256) {
+      position_ = 0;
+    }
+    if ((position_ % 8) == 0) {
+      SetBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
+    } else if ((position_ % 8) == 1) {
+      ClearBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
+    }
+    uint8_t byte = position_ >> 3;
+    uint8_t mask = _BV(7 - (position_ & 0x7));
+    Check<TriggerBassDrum>(pattern_bass_drum_, acc_bass_drum_, byte, mask);
+    Check<TriggerSnareDrum>(pattern_snare_drum_, acc_snare_drum_, byte, mask);
+    Check<TriggerRimShot>(pattern_rim_shot_, acc_rim_shot_, byte, mask);
+    Check<TriggerHandClap>(pattern_hand_clap_, acc_hand_clap_, byte, mask);
+    Check<TriggerClosedHiHat>(pattern_closed_hi_hat_, acc_hi_hat_, byte, mask);
+    Check<TriggerOpenHiHat>(pattern_open_hi_hat_, acc_hi_hat_, byte, mask);
+
+    if (state_ == kStopping && (position_ & 31) == 31) {
+      state_ = kStandBy;
+    }
+  }
+};
+
+Sequencer g_sequencer{};
+
+uint8_t g_tap_count = 0;
+uint32_t g_tempo_clock_count = 0;
+
+inline void Tap(int8_t x) {
+  if (g_tap_count == 0) {
+    // initial
+    g_tempo_clock_count = 0;
+    g_sequencer_position = (g_sequencer_position + 4) / 8 * 8;
+    SetBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
+  } else {
+    g_tempo_wrap = (g_tempo_clock_count / g_tap_count) >> 3;
+  }
+  ++g_tap_count;
+}
+
+inline void ToggleSequencer(int8_t x) { g_sequencer.Toggle(); }
+
 template <void (*TriggerFunc)(int8_t)>
 void CheckSwitch(uint8_t prev_switches, uint8_t new_switches, uint8_t switch_bit, int8_t param) {
   if ((prev_switches & _BV(switch_bit)) && !(new_switches & _BV(switch_bit))) {
@@ -496,12 +695,18 @@ void CheckSwitches(uint8_t prev_switches, uint8_t new_switches) {
   if ((prev_switches ^ new_switches) == 0) {
     return;
   }
+  if ((new_switches & _BV(BIT_SW_SHIFT)) == 0) {
+    CheckSwitch<Tap>(prev_switches, new_switches, BIT_SW_BASS_DRUM, 0);
+    return;
+  }
+  g_tap_count = 0;
   CheckSwitch<TriggerBassDrum>(prev_switches, new_switches, BIT_SW_BASS_DRUM, 127);
   CheckSwitch<TriggerSnareDrum>(prev_switches, new_switches, BIT_SW_SNARE_DRUM, 127);
   CheckSwitch<TriggerRimShot>(prev_switches, new_switches, BIT_SW_RIM_SHOT, 127);
   CheckSwitch<TriggerHandClap>(prev_switches, new_switches, BIT_SW_HAND_CLAP, 127);
   CheckSwitch<TriggerOpenHiHat>(prev_switches, new_switches, BIT_SW_OPEN_HI_HAT, 127);
   CheckSwitch<TriggerClosedHiHat>(prev_switches, new_switches, BIT_SW_CLOSED_HI_HAT, 127);
+  CheckSwitch<ToggleSequencer>(prev_switches, new_switches, BIT_SW_DIN_MUTE, 127);
 }
 
 template <typename InstrumentT>
@@ -537,6 +742,15 @@ void CheckInstruments() {
       ClearBit(PORT_LED_CLOSED_HI_HAT, BIT_LED_CLOSED_HI_HAT);
       ClearBit(PORT_LED_OPEN_HI_HAT, BIT_LED_OPEN_HI_HAT);
     }
+  }
+}
+
+void TickSequencerClock() {
+  ++g_sequencer_position;
+  if ((g_sequencer_position % 8) == 0) {
+    SetBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
+  } else if ((g_sequencer_position % 8) == 1) {
+    ClearBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
   }
 }
 
@@ -637,10 +851,12 @@ int main(void) {
     StartupSequence();
   }
 
-  volatile uint8_t prev_timer_value = 0;
-  volatile uint8_t prev_switches = PORT_SWITCHES;
-  volatile uint8_t noise_clock = 0;
-  volatile uint32_t noise_register = ~0;
+  uint8_t prev_timer_value = 0;
+  uint8_t prev_switches = PORT_SWITCHES;
+  uint8_t noise_clock = 0;
+  uint32_t noise_register = ~0;
+  uint16_t divider = 0;
+  uint16_t tempo_counter = 0;
   while (1) {
     // Check MIDI input
     while (UCSR1A & _BV(RXC1)) {
@@ -650,19 +866,21 @@ int main(void) {
     // Check the master app clock
     uint8_t current_timer_value = TCNT0;
     if (current_timer_value < prev_timer_value) {
-      ++g_divider;
+      ++divider;
       CheckInstruments();
-      uint8_t current_switches = PORT_SWITCHES;
-      if ((g_divider & 0x3f) == 0) {  // every 64 cycles = 8ms
+      if (++tempo_counter == g_tempo_wrap) {
+        g_sequencer.Proceed();
+        tempo_counter = 0;
+      }
+      ++g_tempo_clock_count;
+      if ((divider & 0x3f) == 0) {  // every 64 cycles = 8ms
+        uint8_t current_switches = PORT_SWITCHES;
         CheckSwitches(prev_switches, current_switches);
         prev_switches = current_switches;
 
-        if ((g_divider & 0x7f) == 0) {  // every 128 cycles = 16ms
+        if ((divider & 0x7f) == 0) {  // every 128 cycles = 16ms
           HandleAdc();
         }
-      }
-      if ((g_divider & 0xFFF) == 0) {  // every 0.5 seconds
-        ToggleBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
       }
     }
     prev_timer_value = current_timer_value;
