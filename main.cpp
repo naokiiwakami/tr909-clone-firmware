@@ -430,7 +430,7 @@ void StartupSequence() {
 }
 
 void InitializeSequencer() {
-  g_tempo_wrap = 450;
+  g_tempo_wrap = 150;
   g_sequencer_position = 0;
   SetBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
 }
@@ -642,24 +642,28 @@ class Sequencer {
     if (state_ == kStandBy) {
       return;
     }
-    if (++position_ == 256) {
+    if (++position_ == 768) {
       position_ = 0;
     }
-    if ((position_ % 8) == 0) {
+    auto mod = position_ % 24;
+    if (mod == 0) {
       SetBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
-    } else if ((position_ % 8) == 1) {
+    } else if (mod == 3) {
       ClearBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
     }
-    uint8_t byte = position_ >> 3;
-    uint8_t mask = _BV(7 - (position_ & 0x7));
-    Check<TriggerBassDrum>(pattern_bass_drum_, acc_bass_drum_, byte, mask);
-    Check<TriggerSnareDrum>(pattern_snare_drum_, acc_snare_drum_, byte, mask);
-    Check<TriggerRimShot>(pattern_rim_shot_, acc_rim_shot_, byte, mask);
-    Check<TriggerHandClap>(pattern_hand_clap_, acc_hand_clap_, byte, mask);
-    Check<TriggerClosedHiHat>(pattern_closed_hi_hat_, acc_hi_hat_, byte, mask);
-    Check<TriggerOpenHiHat>(pattern_open_hi_hat_, acc_hi_hat_, byte, mask);
+    if (position_ % 3 == 0) {
+      auto pos = position_ / 3;
+      uint8_t byte = pos >> 3;
+      uint8_t mask = _BV(7 - (pos & 0x7));
+      Check<TriggerBassDrum>(pattern_bass_drum_, acc_bass_drum_, byte, mask);
+      Check<TriggerSnareDrum>(pattern_snare_drum_, acc_snare_drum_, byte, mask);
+      Check<TriggerRimShot>(pattern_rim_shot_, acc_rim_shot_, byte, mask);
+      Check<TriggerHandClap>(pattern_hand_clap_, acc_hand_clap_, byte, mask);
+      Check<TriggerClosedHiHat>(pattern_closed_hi_hat_, acc_hi_hat_, byte, mask);
+      Check<TriggerOpenHiHat>(pattern_open_hi_hat_, acc_hi_hat_, byte, mask);
+    }
 
-    if (state_ == kStopping && (position_ & 31) == 31) {
+    if (state_ == kStopping && (position_ & 95) == 95) {
       state_ = kStandBy;
     }
   }
@@ -674,10 +678,10 @@ inline void Tap(int8_t x) {
   if (g_tap_count == 0) {
     // initial
     g_tempo_clock_count = 0;
-    g_sequencer_position = (g_sequencer_position + 4) / 8 * 8;
+    g_sequencer_position = (g_sequencer_position + 12) / 24 * 24;
     SetBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
   } else {
-    g_tempo_wrap = (g_tempo_clock_count / g_tap_count) >> 3;
+    g_tempo_wrap = (g_tempo_clock_count / g_tap_count) / 24;
   }
   ++g_tap_count;
 }
