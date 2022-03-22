@@ -11,6 +11,7 @@
 #include "eeprom.h"
 #include "hi_hat_wav.h"
 #include "instruments.h"
+#include "midi_message.h"
 #include "ports.h"
 
 // System clock frequency
@@ -44,19 +45,6 @@ struct MidiMessage {
 
 static MidiMessage g_midi_message;
 static uint8_t g_midi_channel;
-
-static constexpr uint8_t MIDI_NOTE_OFF = 0x80;
-static constexpr uint8_t MIDI_NOTE_ON = 0x90;
-static constexpr uint8_t MIDI_CONTROL_CHANGE = 0xb0;
-static constexpr uint8_t MIDI_PROGRAM_CHANGE = 0xc0;
-static constexpr uint8_t MIDI_CHANNEL_PRESSURE = 0xd0;
-
-static constexpr uint8_t MIDI_NOTE_BASS_DRUM = 36;      // C1
-static constexpr uint8_t MIDI_NOTE_SNARE_DRUM = 38;     // D1
-static constexpr uint8_t MIDI_NOTE_RIM_SHOT = 37;       // C#1
-static constexpr uint8_t MIDI_NOTE_HAND_CLAP = 39;      // D#1
-static constexpr uint8_t MIDI_NOTE_CLOSED_HI_HAT = 42;  // F#1
-static constexpr uint8_t MIDI_NOTE_OPEN_HI_HAT = 46;    // A#1
 
 // Utilities ///////////////////////////////////////
 
@@ -528,6 +516,8 @@ class Sequencer {
   static constexpr uint8_t kStandBy = 0;
   static constexpr uint8_t kRunning = 1;
   static constexpr uint8_t kStopping = 2;
+  static constexpr uint8_t kStandByRecording = 4;
+  static constexpr uint8_t kRecording = 8;
 
   Sequencer() : position_{-1}, state_{kStandBy} {
     // tentative initialization
@@ -619,9 +609,13 @@ class Sequencer {
     }
   }
 
+  inline uint8_t GetState() const { return state_; }
+
   inline void Start() { state_ = kRunning; }
 
   inline void Stop() { state_ = kStopping; }
+
+  inline void StopImmediately() { state_ = kStandBy; }
 
   inline void Toggle() {
     if (state_ == kStandBy) {
@@ -629,6 +623,16 @@ class Sequencer {
     } else if (state_ == kRunning) {
       Stop();
     }
+  }
+
+  inline void StandByRecording() {
+    position_ = -1;
+    state_ = kStandByRecording;
+  }
+
+  inline void StartRecording() {
+    state_ = kRecording;
+    ClearBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
   }
 
   template <void (*TriggerFunc)(int8_t)>
@@ -639,7 +643,10 @@ class Sequencer {
   }
 
   void Proceed() {
-    if (state_ == kStandBy) {
+    if (state_ & kStandByRecording) {
+      ToggleBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
+    }
+    if ((state_ & (kRunning | kStopping)) == 0) {
       return;
     }
     if (++position_ == 768) {
@@ -663,9 +670,41 @@ class Sequencer {
       Check<TriggerOpenHiHat>(pattern_open_hi_hat_, acc_hi_hat_, byte, mask);
     }
 
+    if (state_ == kStopping && (position_ % 96) == 95) {
+      state_ = kStandBy;
+    }
+  }
+
+  void StepForwardRecording() {
+    if (state_ != kRecording) {
+      return;
+    }
+    if (++position_ == 768) {
+      position_ = 0;
+    }
+    auto mod = position_ % 24;
+    if (mod == 0) {
+      SetBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
+    } else if (mod == 3) {
+      ClearBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
+    }
+    /*
+    if (position_ % 3 == 0) {
+      auto pos = position_ / 3;
+      uint8_t byte = pos >> 3;
+      uint8_t mask = _BV(7 - (pos & 0x7));
+      Check<TriggerBassDrum>(pattern_bass_drum_, acc_bass_drum_, byte, mask);
+      Check<TriggerSnareDrum>(pattern_snare_drum_, acc_snare_drum_, byte, mask);
+      Check<TriggerRimShot>(pattern_rim_shot_, acc_rim_shot_, byte, mask);
+      Check<TriggerHandClap>(pattern_hand_clap_, acc_hand_clap_, byte, mask);
+      Check<TriggerClosedHiHat>(pattern_closed_hi_hat_, acc_hi_hat_, byte, mask);
+      Check<TriggerOpenHiHat>(pattern_open_hi_hat_, acc_hi_hat_, byte, mask);
+    }
+
     if (state_ == kStopping && (position_ & 95) == 95) {
       state_ = kStandBy;
     }
+    */
   }
 };
 
@@ -688,6 +727,8 @@ inline void Tap(int8_t x) {
 
 inline void ToggleSequencer(int8_t x) { g_sequencer.Toggle(); }
 
+inline void SequencerStandByRecording(int8_t x) { g_sequencer.StandByRecording(); }
+
 template <void (*TriggerFunc)(int8_t)>
 void CheckSwitch(uint8_t prev_switches, uint8_t new_switches, uint8_t switch_bit, int8_t param) {
   if ((prev_switches & _BV(switch_bit)) && !(new_switches & _BV(switch_bit))) {
@@ -701,6 +742,7 @@ void CheckSwitches(uint8_t prev_switches, uint8_t new_switches) {
   }
   if ((new_switches & _BV(BIT_SW_SHIFT)) == 0) {
     CheckSwitch<Tap>(prev_switches, new_switches, BIT_SW_BASS_DRUM, 0);
+    CheckSwitch<SequencerStandByRecording>(prev_switches, new_switches, BIT_SW_DIN_MUTE, 127);
     return;
   }
   g_tap_count = 0;
@@ -749,15 +791,6 @@ void CheckInstruments() {
   }
 }
 
-void TickSequencerClock() {
-  ++g_sequencer_position;
-  if ((g_sequencer_position % 8) == 0) {
-    SetBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
-  } else if ((g_sequencer_position % 8) == 1) {
-    ClearBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
-  }
-}
-
 void HandleAdc() {
   if (!g_adc_ready_to_read) {
     // set the next ADC channel
@@ -788,7 +821,19 @@ static void ProcessMidiChannelMessage();
 
 void ParseMidiInput(uint8_t next_byte) {
   if (next_byte >= 0xf0) {
-    // TODO: Handle the system-common or system-realtime message
+    switch (next_byte) {
+      case MIDI_REALTIME_START:
+        if (g_sequencer.GetState() == Sequencer::kStandByRecording) {
+          g_sequencer.StartRecording();
+        }
+        break;
+      case MIDI_REALTIME_CLOCK:
+        g_sequencer.StepForwardRecording();
+        break;
+      case MIDI_REALTIME_STOP:
+        g_sequencer.StopImmediately();
+        break;
+    }
     return;
   }
   if (next_byte > 0x7f) {  // is status byte

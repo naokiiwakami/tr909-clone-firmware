@@ -166,6 +166,9 @@
     <Compile Include="main.cpp">
       <SubType>compile</SubType>
     </Compile>
+    <Compile Include="midi_message.h">
+      <SubType>compile</SubType>
+    </Compile>
     <Compile Include="ports.h">
       <SubType>compile</SubType>
     </Compile>
