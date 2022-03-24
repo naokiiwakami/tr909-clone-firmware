@@ -494,23 +494,30 @@ inline void TriggerClosedHiHat(int8_t velocity) {
   TriggerHiHat<ClearBit, SetBit, ClearBit, ADDRESS_CLOSED_HI_HAT_START, ADDRESS_END>(velocity);
 }
 
+enum class Drum : uint8_t {
+  kBassDrum,
+  kSnareDrum,
+  kRimShot,
+  kHandClap,
+  kClosedHiHat,
+  kOpenHiHat,
+  kOutOfRange,
+};
+
 class Sequencer {
  private:
-  uint8_t pattern_bass_drum_[32];
-  uint8_t acc_bass_drum_[32];
-  uint8_t pattern_snare_drum_[32];
-  uint8_t acc_snare_drum_[32];
-  uint8_t pattern_rim_shot_[32];
-  uint8_t acc_rim_shot_[32];
-  uint8_t pattern_hand_clap_[32];
-  uint8_t acc_hand_clap_[32];
-  uint8_t pattern_closed_hi_hat_[32];
-  uint8_t pattern_open_hi_hat_[32];
-  uint8_t acc_hi_hat_[32];
+  static constexpr int kNumDrums = static_cast<int>(Drum::kOutOfRange);
+  uint8_t patterns_[kNumDrums][32];
+  uint8_t accents_[kNumDrums][32];
 
   int16_t position_;
 
   uint8_t state_;
+
+  static constexpr void (*trigger_func_[])(int8_t) = {
+      TriggerBassDrum, TriggerSnareDrum,   TriggerRimShot,
+      TriggerHandClap, TriggerClosedHiHat, TriggerOpenHiHat,
+  };
 
  public:
   static constexpr uint8_t kStandBy = 0;
@@ -519,93 +526,80 @@ class Sequencer {
   static constexpr uint8_t kStandByRecording = 4;
   static constexpr uint8_t kRecording = 8;
 
+  inline uint8_t DrumIndex(Drum drum) { return static_cast<uint8_t>(drum); }
+
   Sequencer() : position_{-1}, state_{kStandBy} {
+    Clear();
     // tentative initialization
     for (int i = 0; i < 32; ++i) {
       switch (i % 8) {
         case 0:
-          pattern_bass_drum_[i] = 0x80;
-          acc_bass_drum_[i] = 0x80;
-          pattern_snare_drum_[i] = 0;
-          acc_snare_drum_[i] = 0;
-          pattern_closed_hi_hat_[i] = 0x88;
-          acc_hi_hat_[i] = 0x80;
+          patterns_[DrumIndex(Drum::kBassDrum)][i] = 0x80;
+          accents_[DrumIndex(Drum::kBassDrum)][i] = 0x80;
+          patterns_[DrumIndex(Drum::kClosedHiHat)][i] = 0x88;
+          accents_[DrumIndex(Drum::kClosedHiHat)][i] = 0x80;
           break;
         case 1:
-          pattern_bass_drum_[i] = 0x08;
-          acc_bass_drum_[i] = 0x0;
-          pattern_snare_drum_[i] = 0x80;
-          acc_snare_drum_[i] = 0x80;
-          pattern_closed_hi_hat_[i] = 0x88;
-          pattern_open_hi_hat_[i] = 0x0;
-          acc_hi_hat_[i] = 0x80;
+          patterns_[DrumIndex(Drum::kBassDrum)][i] = 0x08;
+          accents_[DrumIndex(Drum::kBassDrum)][i] = 0x0;
+          patterns_[DrumIndex(Drum::kSnareDrum)][i] = 0x80;
+          accents_[DrumIndex(Drum::kSnareDrum)][i] = 0x80;
+          patterns_[DrumIndex(Drum::kClosedHiHat)][i] = 0x88;
+          accents_[DrumIndex(Drum::kClosedHiHat)][i] = 0x80;
           break;
         case 2:
-          pattern_bass_drum_[i] = 0x80;
-          acc_bass_drum_[i] = 0x80;
-          pattern_snare_drum_[i] = 0;
-          acc_snare_drum_[i] = 0;
-          pattern_closed_hi_hat_[i] = 0x88;
-          pattern_open_hi_hat_[i] = 0x0;
-          acc_hi_hat_[i] = 0x80;
+          patterns_[DrumIndex(Drum::kBassDrum)][i] = 0x80;
+          accents_[DrumIndex(Drum::kBassDrum)][i] = 0x80;
+          patterns_[DrumIndex(Drum::kClosedHiHat)][i] = 0x88;
+          accents_[DrumIndex(Drum::kClosedHiHat)][i] = 0x80;
           break;
         case 3:
-          pattern_bass_drum_[i] = 0x08;
-          acc_bass_drum_[i] = 0x08;
-          pattern_snare_drum_[i] = 0x80;
-          acc_snare_drum_[i] = 0x80;
-          pattern_closed_hi_hat_[i] = 0x88;
-          pattern_open_hi_hat_[i] = 0x0;
-          acc_hi_hat_[i] = 0x80;
+          patterns_[DrumIndex(Drum::kBassDrum)][i] = 0x08;
+          accents_[DrumIndex(Drum::kBassDrum)][i] = 0x0;
+          patterns_[DrumIndex(Drum::kSnareDrum)][i] = 0x80;
+          accents_[DrumIndex(Drum::kSnareDrum)][i] = 0x80;
+          patterns_[DrumIndex(Drum::kClosedHiHat)][i] = 0x88;
+          accents_[DrumIndex(Drum::kClosedHiHat)][i] = 0x80;
           break;
         case 4:
-          pattern_bass_drum_[i] = 0x08;
-          acc_bass_drum_[i] = 0x08;
-          pattern_snare_drum_[i] = 0;
-          acc_snare_drum_[i] = 0;
-          pattern_snare_drum_[i] = 0;
-          acc_snare_drum_[i] = 0x0;
-          pattern_closed_hi_hat_[i] = 0x88;
-          pattern_open_hi_hat_[i] = 0x0;
-          acc_hi_hat_[i] = 0x80;
+          patterns_[DrumIndex(Drum::kBassDrum)][i] = 0x80;
+          accents_[DrumIndex(Drum::kBassDrum)][i] = 0x80;
+          patterns_[DrumIndex(Drum::kClosedHiHat)][i] = 0x88;
+          accents_[DrumIndex(Drum::kClosedHiHat)][i] = 0x80;
           break;
         case 5:
-          pattern_bass_drum_[i] = 0x08;
-          acc_bass_drum_[i] = 0x0;
-          pattern_snare_drum_[i] = 0x80;
-          acc_snare_drum_[i] = 0x80;
-          pattern_closed_hi_hat_[i] = 0x88;
-          pattern_open_hi_hat_[i] = 0x00;
-          acc_hi_hat_[i] = 0x80;
+          patterns_[DrumIndex(Drum::kBassDrum)][i] = 0x08;
+          accents_[DrumIndex(Drum::kBassDrum)][i] = 0x0;
+          patterns_[DrumIndex(Drum::kSnareDrum)][i] = 0x80;
+          accents_[DrumIndex(Drum::kSnareDrum)][i] = 0x80;
+          patterns_[DrumIndex(Drum::kClosedHiHat)][i] = 0x88;
+          accents_[DrumIndex(Drum::kClosedHiHat)][i] = 0x80;
           break;
         case 6:
-          pattern_bass_drum_[i] = 0x80;
-          acc_bass_drum_[i] = 0x80;
-          pattern_snare_drum_[i] = 0x0;
-          acc_snare_drum_[i] = 0;
-          pattern_closed_hi_hat_[i] = 0x80;
-          pattern_open_hi_hat_[i] = 0x08;
-          acc_hi_hat_[i] = 0x88;
+          patterns_[DrumIndex(Drum::kBassDrum)][i] = 0x80;
+          accents_[DrumIndex(Drum::kBassDrum)][i] = 0x80;
+          patterns_[DrumIndex(Drum::kClosedHiHat)][i] = 0x80;
+          accents_[DrumIndex(Drum::kClosedHiHat)][i] = 0x80;
+          patterns_[DrumIndex(Drum::kOpenHiHat)][i] = 0x08;
+          accents_[DrumIndex(Drum::kOpenHiHat)][i] = 0x08;
           break;
         case 7:
-          pattern_bass_drum_[i] = 0;
+          patterns_[DrumIndex(Drum::kBassDrum)][i] = 0x08;
+          accents_[DrumIndex(Drum::kBassDrum)][i] = 0x0;
           if (i / 8 == 3) {
-            pattern_snare_drum_[i] = 0x82;
-            pattern_closed_hi_hat_[i] = 0x80;
-            pattern_open_hi_hat_[i] = 0x08;
-            acc_hi_hat_[i] = 0x88;
+            patterns_[DrumIndex(Drum::kSnareDrum)][i] = 0x82;
+            patterns_[DrumIndex(Drum::kClosedHiHat)][i] = 0x80;
+            patterns_[DrumIndex(Drum::kOpenHiHat)][i] = 0x08;
+            accents_[DrumIndex(Drum::kClosedHiHat)][i] = 0x80;
+            accents_[DrumIndex(Drum::kOpenHiHat)][i] = 0x08;
           } else {
-            pattern_snare_drum_[i] = 0x80;
-            pattern_closed_hi_hat_[i] = 0x88;
-            pattern_open_hi_hat_[i] = 0x0;
-            acc_hi_hat_[i] = 0x80;
+            patterns_[DrumIndex(Drum::kSnareDrum)][i] = 0x80;
+            patterns_[DrumIndex(Drum::kClosedHiHat)][i] = 0x88;
+            accents_[DrumIndex(Drum::kClosedHiHat)][i] = 0x88;
           }
-          acc_snare_drum_[i] = 0x80;
+          accents_[DrumIndex(Drum::kSnareDrum)][i] = 0x80;
           break;
       }
-
-      pattern_rim_shot_[i] = 0;
-      pattern_hand_clap_[i] = 0;
     }
   }
 
@@ -628,6 +622,7 @@ class Sequencer {
   inline void StandByRecording() {
     position_ = -1;
     state_ = kStandByRecording;
+    Clear();
   }
 
   inline void StartRecording() {
@@ -635,10 +630,21 @@ class Sequencer {
     ClearBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
   }
 
-  template <void (*TriggerFunc)(int8_t)>
-  inline void Check(uint8_t* pattern, uint8_t* accent, uint8_t index, uint8_t mask) {
-    if (pattern[index] & mask) {
-      TriggerFunc((accent[index] & mask) ? 127 : 63);
+  void Clear() {
+    for (int i = 0; i < kNumDrums; ++i) {
+      for (int j = 0; j < 32; ++j) {
+        patterns_[i][j] = 0;
+        accents_[i][j] = 0;
+      }
+    }
+  }
+
+  template <Drum drum>
+  inline void Check(uint8_t index, uint8_t mask) {
+    constexpr uint8_t drum_index = static_cast<uint8_t>(drum);
+    constexpr auto trigger_func = trigger_func_[drum_index];
+    if (patterns_[drum_index][index] & mask) {
+      trigger_func((accents_[drum_index][index] & mask) ? 127 : 63);
     }
   }
 
@@ -662,12 +668,12 @@ class Sequencer {
       auto pos = position_ / 3;
       uint8_t byte = pos >> 3;
       uint8_t mask = _BV(7 - (pos & 0x7));
-      Check<TriggerBassDrum>(pattern_bass_drum_, acc_bass_drum_, byte, mask);
-      Check<TriggerSnareDrum>(pattern_snare_drum_, acc_snare_drum_, byte, mask);
-      Check<TriggerRimShot>(pattern_rim_shot_, acc_rim_shot_, byte, mask);
-      Check<TriggerHandClap>(pattern_hand_clap_, acc_hand_clap_, byte, mask);
-      Check<TriggerClosedHiHat>(pattern_closed_hi_hat_, acc_hi_hat_, byte, mask);
-      Check<TriggerOpenHiHat>(pattern_open_hi_hat_, acc_hi_hat_, byte, mask);
+      Check<Drum::kBassDrum>(byte, mask);
+      Check<Drum::kSnareDrum>(byte, mask);
+      Check<Drum::kRimShot>(byte, mask);
+      Check<Drum::kHandClap>(byte, mask);
+      Check<Drum::kClosedHiHat>(byte, mask);
+      Check<Drum::kOpenHiHat>(byte, mask);
     }
 
     if (state_ == kStopping && (position_ % 96) == 95) {
@@ -681,6 +687,8 @@ class Sequencer {
     }
     if (++position_ == 768) {
       position_ = 0;
+      StopImmediately();
+      return;
     }
     auto mod = position_ % 24;
     if (mod == 0) {
@@ -688,24 +696,9 @@ class Sequencer {
     } else if (mod == 3) {
       ClearBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
     }
-    /*
-    if (position_ % 3 == 0) {
-      auto pos = position_ / 3;
-      uint8_t byte = pos >> 3;
-      uint8_t mask = _BV(7 - (pos & 0x7));
-      Check<TriggerBassDrum>(pattern_bass_drum_, acc_bass_drum_, byte, mask);
-      Check<TriggerSnareDrum>(pattern_snare_drum_, acc_snare_drum_, byte, mask);
-      Check<TriggerRimShot>(pattern_rim_shot_, acc_rim_shot_, byte, mask);
-      Check<TriggerHandClap>(pattern_hand_clap_, acc_hand_clap_, byte, mask);
-      Check<TriggerClosedHiHat>(pattern_closed_hi_hat_, acc_hi_hat_, byte, mask);
-      Check<TriggerOpenHiHat>(pattern_open_hi_hat_, acc_hi_hat_, byte, mask);
-    }
-
-    if (state_ == kStopping && (position_ & 95) == 95) {
-      state_ = kStandBy;
-    }
-    */
   }
+
+  void Trigger(Drum drum, int8_t velocity) {}
 };
 
 Sequencer g_sequencer{};
