@@ -665,9 +665,9 @@ class Sequencer {
       ClearBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
     }
     if (position_ % 3 == 0) {
-      auto pos = position_ / 3;
-      uint8_t byte = pos >> 3;
-      uint8_t mask = _BV(7 - (pos & 0x7));
+      auto step = position_ / 3;
+      uint8_t byte = step >> 3;
+      uint8_t mask = _BV(7 - (step & 0x7));
       Check<Drum::kBassDrum>(byte, mask);
       Check<Drum::kSnareDrum>(byte, mask);
       Check<Drum::kRimShot>(byte, mask);
@@ -698,7 +698,21 @@ class Sequencer {
     }
   }
 
-  void Trigger(Drum drum, int8_t velocity) {}
+  template <Drum drum>
+  void Trigger(int8_t velocity) {
+    constexpr uint8_t drum_index = static_cast<uint8_t>(drum);
+    constexpr auto trigger_func = trigger_func_[drum_index];
+    trigger_func(velocity);
+    if (state_ == kRecording) {
+      uint16_t step = (position_ + 1) / 3;
+      uint8_t byte = step >> 3;
+      uint8_t mask = _BV(7 - (step & 0x7));
+      patterns_[drum_index][byte] |= mask;
+      if (velocity >= 96) {
+        accents_[drum_index][byte] |= mask;
+      }
+    }
+  }
 };
 
 Sequencer g_sequencer{};
@@ -862,22 +876,22 @@ void ProcessMidiChannelMessage() {
       auto& note = g_midi_message.data[0];
       switch (note) {
         case MIDI_NOTE_BASS_DRUM:
-          TriggerBassDrum(velocity);
+          g_sequencer.Trigger<Drum::kBassDrum>(velocity);
           break;
         case MIDI_NOTE_SNARE_DRUM:
-          TriggerSnareDrum(velocity);
+          g_sequencer.Trigger<Drum::kSnareDrum>(velocity);
           break;
         case MIDI_NOTE_RIM_SHOT:
-          TriggerRimShot(velocity);
+          g_sequencer.Trigger<Drum::kRimShot>(velocity);
           break;
         case MIDI_NOTE_HAND_CLAP:
-          TriggerHandClap(velocity);
+          g_sequencer.Trigger<Drum::kHandClap>(velocity);
           break;
         case MIDI_NOTE_CLOSED_HI_HAT:
-          TriggerClosedHiHat(velocity);
+          g_sequencer.Trigger<Drum::kClosedHiHat>(velocity);
           break;
         case MIDI_NOTE_OPEN_HI_HAT:
-          TriggerOpenHiHat(velocity);
+          g_sequencer.Trigger<Drum::kOpenHiHat>(velocity);
           break;
       }
     } break;
