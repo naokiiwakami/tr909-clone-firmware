@@ -8,6 +8,19 @@
 #ifndef INSTRUMENTS_H_
 #define INSTRUMENTS_H_
 
+/**
+ * Enum used for identifying the drum type.
+ */
+enum class Drum : uint8_t {
+  kBassDrum,
+  kSnareDrum,
+  kRimShot,
+  kHandClap,
+  kClosedHiHat,
+  kOpenHiHat,
+  kOutOfRange,
+};
+
 typedef struct bass_drum {
   uint8_t status;
 } bass_drum_t;

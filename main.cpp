@@ -494,21 +494,21 @@ inline void TriggerClosedHiHat(int8_t velocity) {
   TriggerHiHat<ClearBit, SetBit, ClearBit, ADDRESS_CLOSED_HI_HAT_START, ADDRESS_END>(velocity);
 }
 
-enum class Drum : uint8_t {
-  kBassDrum,
-  kSnareDrum,
-  kRimShot,
-  kHandClap,
-  kClosedHiHat,
-  kOpenHiHat,
-  kOutOfRange,
-};
+uint32_t g_tempo_clock_count = 0;
 
 class Sequencer {
  private:
   static constexpr int kNumDrums = static_cast<int>(Drum::kOutOfRange);
-  uint8_t patterns_[kNumDrums][32];
-  uint8_t accents_[kNumDrums][32];
+  static constexpr int kNumBars = 4;
+  static constexpr int kTicksPerQuarterNote = 24;
+  static constexpr int kTicksPerBar = kTicksPerQuarterNote * 4;
+  static constexpr int kTotalClockTicks = kNumBars * kTicksPerBar;
+  static constexpr int kPatternBytes = kTotalClockTicks / 8;
+  uint8_t patterns_[kNumDrums][kPatternBytes];
+  uint8_t accents_[kNumDrums][kPatternBytes];
+  uint32_t prev_clock_;
+  uint32_t last_triggers_[kNumDrums];
+  uint8_t last_accent_;
 
   int16_t position_;
 
@@ -531,7 +531,8 @@ class Sequencer {
   Sequencer() : position_{-1}, state_{kStandBy} {
     Clear();
     // tentative initialization
-    for (int i = 0; i < 32; ++i) {
+    /*
+    for (int i = 0; i < kPatternBytes; ++i) {
       switch (i % 8) {
         case 0:
           patterns_[DrumIndex(Drum::kBassDrum)][i] = 0x80;
@@ -601,6 +602,7 @@ class Sequencer {
           break;
       }
     }
+    */
   }
 
   inline uint8_t GetState() const { return state_; }
@@ -621,22 +623,26 @@ class Sequencer {
 
   inline void StandByRecording() {
     position_ = -1;
+    g_tempo_clock_count = 0;
     state_ = kStandByRecording;
     Clear();
   }
 
   inline void StartRecording() {
     state_ = kRecording;
+    prev_clock_ = g_tempo_clock_count;
     ClearBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
   }
 
   void Clear() {
     for (int i = 0; i < kNumDrums; ++i) {
-      for (int j = 0; j < 32; ++j) {
+      last_triggers_[i] = 0;
+      for (int j = 0; j < kPatternBytes; ++j) {
         patterns_[i][j] = 0;
         accents_[i][j] = 0;
       }
     }
+    last_accent_ = 0;
   }
 
   template <Drum drum>
@@ -648,14 +654,14 @@ class Sequencer {
     }
   }
 
-  void Proceed() {
+  void StepForward() {
     if (state_ & kStandByRecording) {
       ToggleBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
     }
     if ((state_ & (kRunning | kStopping)) == 0) {
       return;
     }
-    if (++position_ == 768) {
+    if (++position_ == kTotalClockTicks) {
       position_ = 0;
     }
     auto mod = position_ % 24;
@@ -664,19 +670,16 @@ class Sequencer {
     } else if (mod == 3) {
       ClearBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
     }
-    if (position_ % 3 == 0) {
-      auto step = position_ / 3;
-      uint8_t byte = step >> 3;
-      uint8_t mask = _BV(7 - (step & 0x7));
-      Check<Drum::kBassDrum>(byte, mask);
-      Check<Drum::kSnareDrum>(byte, mask);
-      Check<Drum::kRimShot>(byte, mask);
-      Check<Drum::kHandClap>(byte, mask);
-      Check<Drum::kClosedHiHat>(byte, mask);
-      Check<Drum::kOpenHiHat>(byte, mask);
-    }
+    uint8_t byte = position_ >> 3;
+    uint8_t mask = _BV(7 - (position_ & 0x7));
+    Check<Drum::kBassDrum>(byte, mask);
+    Check<Drum::kSnareDrum>(byte, mask);
+    Check<Drum::kRimShot>(byte, mask);
+    Check<Drum::kHandClap>(byte, mask);
+    Check<Drum::kClosedHiHat>(byte, mask);
+    Check<Drum::kOpenHiHat>(byte, mask);
 
-    if (state_ == kStopping && (position_ % 96) == 95) {
+    if (state_ == kStopping && (position_ % kTicksPerBar) == (kTicksPerBar - 1)) {
       state_ = kStandBy;
     }
   }
@@ -685,12 +688,29 @@ class Sequencer {
     if (state_ != kRecording) {
       return;
     }
-    if (++position_ == 768) {
+    if (position_ >= 0) {
+      g_tempo_wrap = g_tempo_clock_count - prev_clock_;
+      auto margin = g_tempo_wrap >> 1;
+      uint8_t byte = position_ >> 3;
+      uint8_t mask = _BV(7 - (position_ & 0x7));
+      for (auto i = 0; i < kNumDrums; ++i) {
+        auto trigger_clock = last_triggers_[i];
+        if (trigger_clock >= prev_clock_ - margin && trigger_clock < prev_clock_ + margin) {
+          patterns_[i][byte] |= mask;
+          if (last_accent_ & _BV(i)) {
+            accents_[i][byte] |= mask;
+          }
+        }
+      }
+    }
+    prev_clock_ = g_tempo_clock_count;
+    if (++position_ == kTotalClockTicks) {
       position_ = 0;
       StopImmediately();
+      // g_tempo_wrap = g_tempo_clock_count / kTotalClockTicks;
       return;
     }
-    auto mod = position_ % 24;
+    auto mod = position_ % kTicksPerQuarterNote;
     if (mod == 0) {
       SetBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
     } else if (mod == 3) {
@@ -703,13 +723,12 @@ class Sequencer {
     constexpr uint8_t drum_index = static_cast<uint8_t>(drum);
     constexpr auto trigger_func = trigger_func_[drum_index];
     trigger_func(velocity);
-    if (state_ == kRecording) {
-      uint16_t step = (position_ + 1) / 3;
-      uint8_t byte = step >> 3;
-      uint8_t mask = _BV(7 - (step & 0x7));
-      patterns_[drum_index][byte] |= mask;
+    if (state_ == kRecording || state_ == kStandByRecording) {
+      last_triggers_[drum_index] = g_tempo_clock_count;
       if (velocity >= 96) {
-        accents_[drum_index][byte] |= mask;
+        last_accent_ |= _BV(drum_index);
+      } else {
+        last_accent_ &= ~_BV(drum_index);
       }
     }
   }
@@ -718,7 +737,6 @@ class Sequencer {
 Sequencer g_sequencer{};
 
 uint8_t g_tap_count = 0;
-uint32_t g_tempo_clock_count = 0;
 
 inline void Tap(int8_t x) {
   if (g_tap_count == 0) {
@@ -925,7 +943,7 @@ int main(void) {
       ++divider;
       CheckInstruments();
       if (++tempo_counter == g_tempo_wrap) {
-        g_sequencer.Proceed();
+        g_sequencer.StepForward();
         tempo_counter = 0;
       }
       ++g_tempo_clock_count;
