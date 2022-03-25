@@ -506,6 +506,7 @@ class Sequencer {
   static constexpr int kPatternBytes = kTotalClockTicks / 8;
   uint8_t patterns_[kNumDrums][kPatternBytes];
   uint8_t accents_[kNumDrums][kPatternBytes];
+  uint32_t clock0_;
   uint32_t prev_clock_;
   uint32_t last_triggers_[kNumDrums];
   uint8_t last_accent_;
@@ -631,6 +632,7 @@ class Sequencer {
   inline void StartRecording() {
     state_ = kRecording;
     prev_clock_ = g_tempo_clock_count;
+    clock0_ = prev_clock_;
     ClearBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
   }
 
@@ -704,11 +706,12 @@ class Sequencer {
       }
     }
     prev_clock_ = g_tempo_clock_count;
-    if (++position_ == kTotalClockTicks) {
-      position_ = 0;
+    if (position_ == kTotalClockTicks - 1) {
       StopImmediately();
-      // g_tempo_wrap = g_tempo_clock_count / kTotalClockTicks;
+      g_tempo_wrap = (g_tempo_clock_count - clock0_) / kTotalClockTicks;
       return;
+    } else {
+      ++position_;
     }
     auto mod = position_ % kTicksPerQuarterNote;
     if (mod == 0) {
