@@ -54,6 +54,7 @@ void InitializeEEPROM() {
   if (eeprom_read_byte(E_MAGIC) != 0xa2) {
     eeprom_write_byte(E_MIDI_CH, 0);
     eeprom_write_byte(E_MAGIC, 0xa2);
+    eeprom_write_word(E_TEMPO, 150);
   }
 }
 
@@ -367,7 +368,7 @@ void StartupSequence() {
 }
 
 void InitializeSequencer() {
-  g_tempo_wrap = 150;
+  g_tempo_wrap = eeprom_read_word(E_TEMPO);
   g_sequencer_position = 0;
   SetBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
 }

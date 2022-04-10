@@ -51,79 +51,13 @@ class Sequencer {
         position_{-1},
         state_{kStandBy} {
     Clear();
-    // tentative initialization
-    /*
-    for (int i = 0; i < kPatternBytes; ++i) {
-      switch (i % 8) {
-        case 0:
-          patterns_[DrumIndex(Drum::kBassDrum)][i] = 0x80;
-          accents_[DrumIndex(Drum::kBassDrum)][i] = 0x80;
-          patterns_[DrumIndex(Drum::kClosedHiHat)][i] = 0x88;
-          accents_[DrumIndex(Drum::kClosedHiHat)][i] = 0x80;
-          break;
-        case 1:
-          patterns_[DrumIndex(Drum::kBassDrum)][i] = 0x08;
-          accents_[DrumIndex(Drum::kBassDrum)][i] = 0x0;
-          patterns_[DrumIndex(Drum::kSnareDrum)][i] = 0x80;
-          accents_[DrumIndex(Drum::kSnareDrum)][i] = 0x80;
-          patterns_[DrumIndex(Drum::kClosedHiHat)][i] = 0x88;
-          accents_[DrumIndex(Drum::kClosedHiHat)][i] = 0x80;
-          break;
-        case 2:
-          patterns_[DrumIndex(Drum::kBassDrum)][i] = 0x80;
-          accents_[DrumIndex(Drum::kBassDrum)][i] = 0x80;
-          patterns_[DrumIndex(Drum::kClosedHiHat)][i] = 0x88;
-          accents_[DrumIndex(Drum::kClosedHiHat)][i] = 0x80;
-          break;
-        case 3:
-          patterns_[DrumIndex(Drum::kBassDrum)][i] = 0x08;
-          accents_[DrumIndex(Drum::kBassDrum)][i] = 0x0;
-          patterns_[DrumIndex(Drum::kSnareDrum)][i] = 0x80;
-          accents_[DrumIndex(Drum::kSnareDrum)][i] = 0x80;
-          patterns_[DrumIndex(Drum::kClosedHiHat)][i] = 0x88;
-          accents_[DrumIndex(Drum::kClosedHiHat)][i] = 0x80;
-          break;
-        case 4:
-          patterns_[DrumIndex(Drum::kBassDrum)][i] = 0x80;
-          accents_[DrumIndex(Drum::kBassDrum)][i] = 0x80;
-          patterns_[DrumIndex(Drum::kClosedHiHat)][i] = 0x88;
-          accents_[DrumIndex(Drum::kClosedHiHat)][i] = 0x80;
-          break;
-        case 5:
-          patterns_[DrumIndex(Drum::kBassDrum)][i] = 0x08;
-          accents_[DrumIndex(Drum::kBassDrum)][i] = 0x0;
-          patterns_[DrumIndex(Drum::kSnareDrum)][i] = 0x80;
-          accents_[DrumIndex(Drum::kSnareDrum)][i] = 0x80;
-          patterns_[DrumIndex(Drum::kClosedHiHat)][i] = 0x88;
-          accents_[DrumIndex(Drum::kClosedHiHat)][i] = 0x80;
-          break;
-        case 6:
-          patterns_[DrumIndex(Drum::kBassDrum)][i] = 0x80;
-          accents_[DrumIndex(Drum::kBassDrum)][i] = 0x80;
-          patterns_[DrumIndex(Drum::kClosedHiHat)][i] = 0x80;
-          accents_[DrumIndex(Drum::kClosedHiHat)][i] = 0x80;
-          patterns_[DrumIndex(Drum::kOpenHiHat)][i] = 0x08;
-          accents_[DrumIndex(Drum::kOpenHiHat)][i] = 0x08;
-          break;
-        case 7:
-          patterns_[DrumIndex(Drum::kBassDrum)][i] = 0x08;
-          accents_[DrumIndex(Drum::kBassDrum)][i] = 0x0;
-          if (i / 8 == 3) {
-            patterns_[DrumIndex(Drum::kSnareDrum)][i] = 0x82;
-            patterns_[DrumIndex(Drum::kClosedHiHat)][i] = 0x80;
-            patterns_[DrumIndex(Drum::kOpenHiHat)][i] = 0x08;
-            accents_[DrumIndex(Drum::kClosedHiHat)][i] = 0x80;
-            accents_[DrumIndex(Drum::kOpenHiHat)][i] = 0x08;
-          } else {
-            patterns_[DrumIndex(Drum::kSnareDrum)][i] = 0x80;
-            patterns_[DrumIndex(Drum::kClosedHiHat)][i] = 0x88;
-            accents_[DrumIndex(Drum::kClosedHiHat)][i] = 0x88;
-          }
-          accents_[DrumIndex(Drum::kSnareDrum)][i] = 0x80;
-          break;
+    for (auto idrum = 0; idrum < kNumDrums; ++idrum) {
+      for (auto ipattern = 0; ipattern < kPatternBytes; ++ipattern) {
+        auto* ptr = E_PATTERN1 + idrum * kPatternBytes + ipattern;
+        patterns_[idrum][ipattern] = eeprom_read_byte(ptr);
+        accents_[idrum][ipattern] = eeprom_read_byte(ptr + kNumDrums * kPatternBytes);
       }
     }
-    */
   }
 
   inline uint8_t GetState() const { return state_; }
@@ -225,14 +159,25 @@ class Sequencer {
         }
       }
     }
+
     prev_clock_ = *tempo_clock_count_;
     if (position_ == kTotalClockTicks - 1) {
       StopImmediately();
       *tempo_wrap_ = (*tempo_clock_count_ - clock0_) / kTotalClockTicks;
+      for (auto idrum = 0; idrum < kNumDrums; ++idrum) {
+        for (auto ipattern = 0; ipattern < kPatternBytes; ++ipattern) {
+          auto* ptr = E_PATTERN1 + idrum * kPatternBytes + ipattern;
+          eeprom_write_byte(ptr, patterns_[idrum][ipattern]);
+          eeprom_write_byte(ptr + kNumDrums * kPatternBytes, accents_[idrum][ipattern]);
+        }
+      }
+      eeprom_write_word(E_TEMPO, *tempo_wrap_);
       return;
     } else {
       ++position_;
     }
+
+    // blink the tempo indicator
     auto mod = position_ % kTicksPerQuarterNote;
     if (mod == 0) {
       SetBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
