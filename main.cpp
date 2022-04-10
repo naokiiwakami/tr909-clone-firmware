@@ -8,11 +8,13 @@
 #include <avr/interrupt.h>
 #include <avr/io.h>
 
-#include "eeprom.h"
-#include "hi_hat_wav.h"
-#include "instruments.h"
-#include "midi_message.h"
-#include "ports.h"
+#include "eeprom.hpp"
+#include "hi_hat_wav.hpp"
+#include "instruments.hpp"
+#include "midi_message.hpp"
+#include "ports.hpp"
+#include "sequencer.hpp"
+#include "utils.hpp"
 
 // System clock frequency
 static constexpr uint32_t F_OSC = 16000000;  // 16 MHz
@@ -45,53 +47,6 @@ struct MidiMessage {
 
 static MidiMessage g_midi_message;
 static uint8_t g_midi_channel;
-
-// Utilities ///////////////////////////////////////
-
-inline static void SetBit(volatile uint8_t& port, const uint8_t bit) { port |= _BV(bit); }
-
-inline static void ClearBit(volatile uint8_t& port, const uint8_t bit) { port &= ~_BV(bit); }
-
-inline static void ToggleBit(volatile uint8_t& port, const uint8_t bit) { port ^= _BV(bit); }
-
-inline static void SetBit(volatile uint8_t& port, const uint8_t bit, bool onOrOff) {
-  if (onOrOff) {
-    SetBit(port, bit);
-  } else {
-    ClearBit(port, bit);
-  }
-}
-
-/**
- * Sets Timer2 management configuration for a hi-hat tune value.
- * The range of tune value is 1024 / 16 = 64.
- */
-inline static void SetHiHatTune(uint8_t tune) { g_hi_hat.tcnt2_on_overflow = tune + 168; }
-
-/**
- * Places PCM value for hi-hat. The value is reflected to the output
- * port immediately but it is not propagated to the external DAC until
- * The latch bit is turned on.
- * The two LSBs of the value must be zeros. The function does not check
- * it for execution speed, so the caller must take care of clearing the
- * two LSBs.
- */
-inline static void PlaceHiHatPcmValue(uint8_t value) { PORT_HI_HAT_PCM_VALUE = value; }
-
-/**
- * Turns on the "PCM latch" bit to propagate the PCM value to the
- * external ADC where the clock port is connected to the latch bit.
- * The function turns on the latch bit but does not turn off by itself.
- * Another function DoneCommitHiHatPcmValue() must be called explicitly
- * afterwards.
- */
-inline static void LatchHiHatPcmValue() { PORT_HI_HAT_PCM_VALUE |= _BV(BIT_HI_HAT_PCM_LATCH); }
-
-/**
- * Turns off the "PCM latch" bit. When CommitHiHatPcmValue() is called,
- * this function must be called but no earlier than 3.5 microseconds.
- */
-inline void UnlatchHiHatPcmValue() { PORT_HI_HAT_PCM_VALUE &= ~_BV(BIT_HI_HAT_PCM_LATCH); }
 
 // Initializers //////////////////////////////////////////
 
@@ -181,7 +136,8 @@ void SetUpTimer() {
   /*
    * Timer2
    */
-  // Timer2 is stopped in the initial state. See StartPcmClock() and StopPcmClock()
+  // Timer2 is stopped in the initial state. See StartPcmClock() and StopPcmClock() in
+  // instruments.hpp
   TCCR2 = 0;
 
   /*
@@ -206,13 +162,6 @@ void SetUpTimer() {
   // Timer2 overflow interrupt enabled (TOIE2)
   TIMSK = _BV(TOIE2);
 }
-
-inline void StartPcmClock() {
-  // normal mode (WGM21, WGM20 = 00), 1/8 prescale (CS21)
-  TCCR2 = _BV(CS21);
-}
-
-inline void StopPcmClock() { TCCR2 = 0; }
 
 ISR(TIMER2_OVF_vect) {
   if (g_hi_hat.pcm_phase == 0) {
@@ -439,305 +388,9 @@ void SetUp() {
 
 static constexpr uint16_t TRIGGER_SHUTDOWN_AT = (255 - 16);  // 2.048 ms
 
-void TriggerBassDrum(int8_t velocity) {
-  REGISTER_VELOCITY_BASS_DRUM = velocity << 1;
-  SetBit(PORT_TRIG_BASS_DRUM, BIT_TRIG_BASS_DRUM);
-  SetBit(PORT_LED_BASS_DRUM, BIT_LED_BASS_DRUM);
-  g_bass_drum.status = 255;
-}
-
-void TriggerSnareDrum(int8_t velocity) {
-  REGISTER_VELOCITY_SNARE_DRUM = velocity << 1;
-  SetBit(PORT_TRIG_SNARE_DRUM, BIT_TRIG_SNARE_DRUM);
-  SetBit(PORT_LED_SNARE_DRUM, BIT_LED_SNARE_DRUM);
-  g_snare_drum.status = 255;
-}
-
-void TriggerRimShot(int8_t velocity) {
-  REGISTER_VELOCITY_RIM_SHOT = velocity << 1;
-  SetBit(PORT_TRIG_RIM_SHOT, BIT_TRIG_RIM_SHOT);
-  SetBit(PORT_LED_RIM_SHOT, BIT_LED_RIM_SHOT);
-  g_rim_shot.status = 255;
-}
-
-void TriggerHandClap(int8_t velocity) {
-  REGISTER_VELOCITY_HAND_CLAP = velocity;
-  SetBit(PORT_TRIG_HAND_CLAP, BIT_TRIG_HAND_CLAP);
-  SetBit(PORT_LED_HAND_CLAP, BIT_LED_HAND_CLAP);
-  g_hand_clap.status = 255;
-}
-
-// Triggering Hi-Hats
-template <void (*OpenHiHatLedFunc)(volatile uint8_t&, const uint8_t),
-          void (*ClosedHiHatLedFunc)(volatile uint8_t&, const uint8_t),
-          void (*HiHatSelectFunc)(volatile uint8_t&, const uint8_t), uint16_t pcm_start,
-          uint16_t pcm_end>
-void TriggerHiHat(int8_t velocity) {
-  REGISTER_VELOCITY_HI_HAT = velocity + 128;
-  SetBit(PORT_TRIG_HI_HAT, BIT_TRIG_HI_HAT);
-  OpenHiHatLedFunc(PORT_LED_OPEN_HI_HAT, BIT_LED_OPEN_HI_HAT);
-  ClosedHiHatLedFunc(PORT_LED_CLOSED_HI_HAT, BIT_LED_CLOSED_HI_HAT);
-  HiHatSelectFunc(PORT_SELECT_HI_HAT, BIT_SELECT_HI_HAT);
-  g_hi_hat.status = 255;
-  g_hi_hat.pcm_address = pcm_start;
-  g_hi_hat.pcm_address_limit = pcm_end;
-  g_hi_hat.pcm_phase = 0;
-  g_hi_hat.pcm_update_ready = 0;
-  StartPcmClock();
-}
-
-inline void TriggerOpenHiHat(int8_t velocity) {
-  TriggerHiHat<SetBit, ClearBit, SetBit, 0, ADDRESS_CLOSED_HI_HAT_START>(velocity);
-}
-
-inline void TriggerClosedHiHat(int8_t velocity) {
-  TriggerHiHat<ClearBit, SetBit, ClearBit, ADDRESS_CLOSED_HI_HAT_START, ADDRESS_END>(velocity);
-}
-
 uint32_t g_tempo_clock_count = 0;
 
-class Sequencer {
- private:
-  static constexpr int kNumDrums = static_cast<int>(Drum::kOutOfRange);
-  static constexpr int kNumBars = 4;
-  static constexpr int kTicksPerQuarterNote = 24;
-  static constexpr int kTicksPerBar = kTicksPerQuarterNote * 4;
-  static constexpr int kTotalClockTicks = kNumBars * kTicksPerBar;
-  static constexpr int kPatternBytes = kTotalClockTicks / 8;
-  uint8_t patterns_[kNumDrums][kPatternBytes];
-  uint8_t accents_[kNumDrums][kPatternBytes];
-  uint32_t clock0_;
-  uint32_t prev_clock_;
-  uint32_t last_triggers_[kNumDrums];
-  uint8_t last_accent_;
-
-  int16_t position_;
-
-  uint8_t state_;
-
-  static constexpr void (*trigger_func_[])(int8_t) = {
-      TriggerBassDrum, TriggerSnareDrum,   TriggerRimShot,
-      TriggerHandClap, TriggerClosedHiHat, TriggerOpenHiHat,
-  };
-
- public:
-  static constexpr uint8_t kStandBy = 0;
-  static constexpr uint8_t kRunning = 1;
-  static constexpr uint8_t kStopping = 2;
-  static constexpr uint8_t kStandByRecording = 4;
-  static constexpr uint8_t kRecording = 8;
-
-  inline uint8_t DrumIndex(Drum drum) { return static_cast<uint8_t>(drum); }
-
-  Sequencer() : position_{-1}, state_{kStandBy} {
-    Clear();
-    // tentative initialization
-    /*
-    for (int i = 0; i < kPatternBytes; ++i) {
-      switch (i % 8) {
-        case 0:
-          patterns_[DrumIndex(Drum::kBassDrum)][i] = 0x80;
-          accents_[DrumIndex(Drum::kBassDrum)][i] = 0x80;
-          patterns_[DrumIndex(Drum::kClosedHiHat)][i] = 0x88;
-          accents_[DrumIndex(Drum::kClosedHiHat)][i] = 0x80;
-          break;
-        case 1:
-          patterns_[DrumIndex(Drum::kBassDrum)][i] = 0x08;
-          accents_[DrumIndex(Drum::kBassDrum)][i] = 0x0;
-          patterns_[DrumIndex(Drum::kSnareDrum)][i] = 0x80;
-          accents_[DrumIndex(Drum::kSnareDrum)][i] = 0x80;
-          patterns_[DrumIndex(Drum::kClosedHiHat)][i] = 0x88;
-          accents_[DrumIndex(Drum::kClosedHiHat)][i] = 0x80;
-          break;
-        case 2:
-          patterns_[DrumIndex(Drum::kBassDrum)][i] = 0x80;
-          accents_[DrumIndex(Drum::kBassDrum)][i] = 0x80;
-          patterns_[DrumIndex(Drum::kClosedHiHat)][i] = 0x88;
-          accents_[DrumIndex(Drum::kClosedHiHat)][i] = 0x80;
-          break;
-        case 3:
-          patterns_[DrumIndex(Drum::kBassDrum)][i] = 0x08;
-          accents_[DrumIndex(Drum::kBassDrum)][i] = 0x0;
-          patterns_[DrumIndex(Drum::kSnareDrum)][i] = 0x80;
-          accents_[DrumIndex(Drum::kSnareDrum)][i] = 0x80;
-          patterns_[DrumIndex(Drum::kClosedHiHat)][i] = 0x88;
-          accents_[DrumIndex(Drum::kClosedHiHat)][i] = 0x80;
-          break;
-        case 4:
-          patterns_[DrumIndex(Drum::kBassDrum)][i] = 0x80;
-          accents_[DrumIndex(Drum::kBassDrum)][i] = 0x80;
-          patterns_[DrumIndex(Drum::kClosedHiHat)][i] = 0x88;
-          accents_[DrumIndex(Drum::kClosedHiHat)][i] = 0x80;
-          break;
-        case 5:
-          patterns_[DrumIndex(Drum::kBassDrum)][i] = 0x08;
-          accents_[DrumIndex(Drum::kBassDrum)][i] = 0x0;
-          patterns_[DrumIndex(Drum::kSnareDrum)][i] = 0x80;
-          accents_[DrumIndex(Drum::kSnareDrum)][i] = 0x80;
-          patterns_[DrumIndex(Drum::kClosedHiHat)][i] = 0x88;
-          accents_[DrumIndex(Drum::kClosedHiHat)][i] = 0x80;
-          break;
-        case 6:
-          patterns_[DrumIndex(Drum::kBassDrum)][i] = 0x80;
-          accents_[DrumIndex(Drum::kBassDrum)][i] = 0x80;
-          patterns_[DrumIndex(Drum::kClosedHiHat)][i] = 0x80;
-          accents_[DrumIndex(Drum::kClosedHiHat)][i] = 0x80;
-          patterns_[DrumIndex(Drum::kOpenHiHat)][i] = 0x08;
-          accents_[DrumIndex(Drum::kOpenHiHat)][i] = 0x08;
-          break;
-        case 7:
-          patterns_[DrumIndex(Drum::kBassDrum)][i] = 0x08;
-          accents_[DrumIndex(Drum::kBassDrum)][i] = 0x0;
-          if (i / 8 == 3) {
-            patterns_[DrumIndex(Drum::kSnareDrum)][i] = 0x82;
-            patterns_[DrumIndex(Drum::kClosedHiHat)][i] = 0x80;
-            patterns_[DrumIndex(Drum::kOpenHiHat)][i] = 0x08;
-            accents_[DrumIndex(Drum::kClosedHiHat)][i] = 0x80;
-            accents_[DrumIndex(Drum::kOpenHiHat)][i] = 0x08;
-          } else {
-            patterns_[DrumIndex(Drum::kSnareDrum)][i] = 0x80;
-            patterns_[DrumIndex(Drum::kClosedHiHat)][i] = 0x88;
-            accents_[DrumIndex(Drum::kClosedHiHat)][i] = 0x88;
-          }
-          accents_[DrumIndex(Drum::kSnareDrum)][i] = 0x80;
-          break;
-      }
-    }
-    */
-  }
-
-  inline uint8_t GetState() const { return state_; }
-
-  inline void Start() { state_ = kRunning; }
-
-  inline void Stop() { state_ = kStopping; }
-
-  inline void StopImmediately() { state_ = kStandBy; }
-
-  inline void Toggle() {
-    if (state_ == kStandBy) {
-      Start();
-    } else if (state_ == kRunning) {
-      Stop();
-    }
-  }
-
-  inline void StandByRecording() {
-    position_ = -1;
-    g_tempo_clock_count = 0;
-    state_ = kStandByRecording;
-    Clear();
-  }
-
-  inline void StartRecording() {
-    state_ = kRecording;
-    prev_clock_ = g_tempo_clock_count;
-    clock0_ = prev_clock_;
-    ClearBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
-  }
-
-  void Clear() {
-    for (int i = 0; i < kNumDrums; ++i) {
-      last_triggers_[i] = 0;
-      for (int j = 0; j < kPatternBytes; ++j) {
-        patterns_[i][j] = 0;
-        accents_[i][j] = 0;
-      }
-    }
-    last_accent_ = 0;
-  }
-
-  template <Drum drum>
-  inline void Check(uint8_t index, uint8_t mask) {
-    constexpr uint8_t drum_index = static_cast<uint8_t>(drum);
-    constexpr auto trigger_func = trigger_func_[drum_index];
-    if (patterns_[drum_index][index] & mask) {
-      trigger_func((accents_[drum_index][index] & mask) ? 127 : 63);
-    }
-  }
-
-  void StepForward() {
-    if (state_ & kStandByRecording) {
-      ToggleBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
-    }
-    if ((state_ & (kRunning | kStopping)) == 0) {
-      return;
-    }
-    if (++position_ == kTotalClockTicks) {
-      position_ = 0;
-    }
-    auto mod = position_ % 24;
-    if (mod == 0) {
-      SetBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
-    } else if (mod == 3) {
-      ClearBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
-    }
-    uint8_t byte = position_ >> 3;
-    uint8_t mask = _BV(7 - (position_ & 0x7));
-    Check<Drum::kBassDrum>(byte, mask);
-    Check<Drum::kSnareDrum>(byte, mask);
-    Check<Drum::kRimShot>(byte, mask);
-    Check<Drum::kHandClap>(byte, mask);
-    Check<Drum::kClosedHiHat>(byte, mask);
-    Check<Drum::kOpenHiHat>(byte, mask);
-
-    if (state_ == kStopping && (position_ % kTicksPerBar) == (kTicksPerBar - 1)) {
-      state_ = kStandBy;
-    }
-  }
-
-  void StepForwardRecording() {
-    if (state_ != kRecording) {
-      return;
-    }
-    if (position_ >= 0) {
-      g_tempo_wrap = g_tempo_clock_count - prev_clock_;
-      auto margin = g_tempo_wrap >> 1;
-      uint8_t byte = position_ >> 3;
-      uint8_t mask = _BV(7 - (position_ & 0x7));
-      for (auto i = 0; i < kNumDrums; ++i) {
-        auto trigger_clock = last_triggers_[i];
-        if (trigger_clock >= prev_clock_ - margin && trigger_clock < prev_clock_ + margin) {
-          patterns_[i][byte] |= mask;
-          if (last_accent_ & _BV(i)) {
-            accents_[i][byte] |= mask;
-          }
-        }
-      }
-    }
-    prev_clock_ = g_tempo_clock_count;
-    if (position_ == kTotalClockTicks - 1) {
-      StopImmediately();
-      g_tempo_wrap = (g_tempo_clock_count - clock0_) / kTotalClockTicks;
-      return;
-    } else {
-      ++position_;
-    }
-    auto mod = position_ % kTicksPerQuarterNote;
-    if (mod == 0) {
-      SetBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
-    } else if (mod == 3) {
-      ClearBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
-    }
-  }
-
-  template <Drum drum>
-  void Trigger(int8_t velocity) {
-    constexpr uint8_t drum_index = static_cast<uint8_t>(drum);
-    constexpr auto trigger_func = trigger_func_[drum_index];
-    trigger_func(velocity);
-    if (state_ == kRecording || state_ == kStandByRecording) {
-      last_triggers_[drum_index] = g_tempo_clock_count;
-      if (velocity >= 96) {
-        last_accent_ |= _BV(drum_index);
-      } else {
-        last_accent_ &= ~_BV(drum_index);
-      }
-    }
-  }
-};
-
-Sequencer g_sequencer{};
+Sequencer g_sequencer{&g_tempo_clock_count, &g_tempo_wrap};
 
 uint8_t g_tap_count = 0;
 

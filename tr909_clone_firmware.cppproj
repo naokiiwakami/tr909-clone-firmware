@@ -154,22 +154,28 @@
     </ToolchainSettings>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="eeprom.h">
+    <Compile Include="eeprom.hpp">
       <SubType>compile</SubType>
     </Compile>
-    <Compile Include="hi_hat_wav.h">
+    <Compile Include="hi_hat_wav.hpp">
       <SubType>compile</SubType>
     </Compile>
-    <Compile Include="instruments.h">
+    <Compile Include="instruments.hpp">
       <SubType>compile</SubType>
     </Compile>
     <Compile Include="main.cpp">
       <SubType>compile</SubType>
     </Compile>
-    <Compile Include="midi_message.h">
+    <Compile Include="midi_message.hpp">
       <SubType>compile</SubType>
     </Compile>
-    <Compile Include="ports.h">
+    <Compile Include="ports.hpp">
+      <SubType>compile</SubType>
+    </Compile>
+    <Compile Include="sequencer.hpp">
+      <SubType>compile</SubType>
+    </Compile>
+    <Compile Include="utils.hpp">
       <SubType>compile</SubType>
     </Compile>
   </ItemGroup>

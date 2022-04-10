@@ -1,12 +1,9 @@
 /*
  * ports.h
- *
- * Created: 1/1/2022 11:42:47 AM
- *  Author: naoki
  */
 
-#ifndef PORTS_H_
-#define PORTS_H_
+#ifndef PORTS_HPP_
+#define PORTS_HPP_
 
 /*
  * I/O Ports:
@@ -153,4 +150,4 @@ static constexpr uint8_t ADMUX_NUM_CHANNELS = 3;
 #define PORT_NOISE PORTG
 #define BIT_NOISE PG3
 
-#endif /* PORTS_H_ */
+#endif /* PORTS_HPP_ */

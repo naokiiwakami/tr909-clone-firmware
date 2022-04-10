@@ -1,12 +1,9 @@
 /*
  * midi_message.h
- *
- * Created: 3/22/2022 10:52:29 PM
- *  Author: naoki
  */
 
-#ifndef MIDI_MESSAGE_H_
-#define MIDI_MESSAGE_H_
+#ifndef MIDI_MESSAGE_HPP_
+#define MIDI_MESSAGE_HPP_
 
 static constexpr uint8_t MIDI_NOTE_OFF = 0x80;
 static constexpr uint8_t MIDI_NOTE_ON = 0x90;
@@ -25,4 +22,4 @@ static constexpr uint8_t MIDI_NOTE_HAND_CLAP = 39;      // D#1
 static constexpr uint8_t MIDI_NOTE_CLOSED_HI_HAT = 42;  // F#1
 static constexpr uint8_t MIDI_NOTE_OPEN_HI_HAT = 46;    // A#1
 
-#endif /* MIDI_MESSAGE_H_ */
+#endif /* MIDI_MESSAGE_HPP_ */

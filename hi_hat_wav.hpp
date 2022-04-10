@@ -1,5 +1,5 @@
-#ifndef HI_HAT_WAV_H_
-#define HI_HAT_WAV_H_
+#ifndef HI_HAT_WAV_HPP_
+#define HI_HAT_WAV_HPP_
 
 #include <avr/pgmspace.h>
 
@@ -2057,4 +2057,4 @@ const uint8_t hi_hat_wav[ADDRESS_END] PROGMEM = {
   /* 0x7ff0 */  0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80,
 };
 
-#endif  /* HI_HAT_WAV_H_ */
+#endif  /* HI_HAT_WAV_HPP_ */
