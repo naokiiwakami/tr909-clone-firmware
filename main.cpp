@@ -520,7 +520,7 @@ void ParseMidiInput(uint8_t next_byte) {
         g_sequencer.StepForwardRecording();
         break;
       case MIDI_REALTIME_STOP:
-        g_sequencer.StopImmediately();
+        g_sequencer.EndRecording();
         break;
     }
     return;

@@ -31,6 +31,8 @@ class Sequencer {
 
   uint8_t state_;
 
+  int data_index_;
+
   static constexpr void (*trigger_func_[])(int8_t) = {
       TriggerBassDrum, TriggerSnareDrum,   TriggerRimShot,
       TriggerHandClap, TriggerClosedHiHat, TriggerOpenHiHat,
@@ -42,6 +44,7 @@ class Sequencer {
   static constexpr uint8_t kStopping = 2;
   static constexpr uint8_t kStandByRecording = 4;
   static constexpr uint8_t kRecording = 8;
+  static constexpr uint8_t kFinishingRecording = 16;
 
   inline uint8_t DrumIndex(Drum drum) { return static_cast<uint8_t>(drum); }
 
@@ -66,7 +69,11 @@ class Sequencer {
 
   inline void Stop() { state_ = kStopping; }
 
-  inline void StopImmediately() { state_ = kStandBy; }
+  inline void EndRecording() {
+    if (state_ == kRecording) {
+      state_ = kFinishingRecording;
+    }
+  }
 
   inline void Toggle() {
     if (state_ == kStandBy) {
@@ -141,7 +148,7 @@ class Sequencer {
   }
 
   void StepForwardRecording() {
-    if (state_ != kRecording) {
+    if (state_ != kRecording && state_ != kFinishingRecording) {
       return;
     }
     if (position_ >= 0) {
@@ -162,20 +169,26 @@ class Sequencer {
 
     prev_clock_ = *tempo_clock_count_;
     if (position_ == kTotalClockTicks - 1) {
-      StopImmediately();
+      EndRecording();
       *tempo_wrap_ = (*tempo_clock_count_ - clock0_) / kTotalClockTicks;
-      for (auto idrum = 0; idrum < kNumDrums; ++idrum) {
-        for (auto ipattern = 0; ipattern < kPatternBytes; ++ipattern) {
-          if ((ipattern & 4) == 0) {
-            ToggleBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
-          }
-          auto* ptr = E_PATTERN1 + idrum * kPatternBytes + ipattern;
-          eeprom_write_byte(ptr, patterns_[idrum][ipattern]);
-          eeprom_write_byte(ptr + kNumDrums * kPatternBytes, accents_[idrum][ipattern]);
+      int i;
+      uint8_t* ptr = &patterns_[0][0];
+      for (i = 0; i < kNumDrums * kPatternBytes; ++i) {
+        if ((i & 4) == 0) {
+          ToggleBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
         }
+        EEPROM_WRITE(E_PATTERN1 + i, ptr[i]);
+      }
+      ptr = &accents_[0][0];
+      for (i = 0; i < kNumDrums * kPatternBytes; ++i) {
+        if ((i & 4) == 0) {
+          ToggleBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
+        }
+        EEPROM_WRITE(E_PATTERN1 + i + kNumDrums * kPatternBytes, ptr[i]);
       }
       eeprom_write_word(E_TEMPO, *tempo_wrap_);
       ClearBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
+      state_ = kStandBy;
       return;
     } else {
       ++position_;
@@ -194,7 +207,7 @@ class Sequencer {
   void Trigger(int8_t velocity) {
     constexpr uint8_t drum_index = static_cast<uint8_t>(drum);
     constexpr auto trigger_func = trigger_func_[drum_index];
-    if (state_ != kStandByRecording) {
+    if (state_ != kStandByRecording && state_ != kFinishingRecording) {
       trigger_func(velocity);
     }
     if (state_ == kRecording || state_ == kStandByRecording) {
