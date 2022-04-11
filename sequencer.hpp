@@ -166,12 +166,16 @@ class Sequencer {
       *tempo_wrap_ = (*tempo_clock_count_ - clock0_) / kTotalClockTicks;
       for (auto idrum = 0; idrum < kNumDrums; ++idrum) {
         for (auto ipattern = 0; ipattern < kPatternBytes; ++ipattern) {
+          if ((ipattern & 4) == 0) {
+            ToggleBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
+          }
           auto* ptr = E_PATTERN1 + idrum * kPatternBytes + ipattern;
           eeprom_write_byte(ptr, patterns_[idrum][ipattern]);
           eeprom_write_byte(ptr + kNumDrums * kPatternBytes, accents_[idrum][ipattern]);
         }
       }
       eeprom_write_word(E_TEMPO, *tempo_wrap_);
+      ClearBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
       return;
     } else {
       ++position_;
@@ -190,7 +194,9 @@ class Sequencer {
   void Trigger(int8_t velocity) {
     constexpr uint8_t drum_index = static_cast<uint8_t>(drum);
     constexpr auto trigger_func = trigger_func_[drum_index];
-    trigger_func(velocity);
+    if (state_ != kStandByRecording) {
+      trigger_func(velocity);
+    }
     if (state_ == kRecording || state_ == kStandByRecording) {
       last_triggers_[drum_index] = *tempo_clock_count_;
       if (velocity >= 96) {

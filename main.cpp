@@ -395,7 +395,7 @@ Sequencer g_sequencer{&g_tempo_clock_count, &g_tempo_wrap};
 
 uint8_t g_tap_count = 0;
 
-inline void Tap(int8_t x) {
+inline void Tap() {
   if (g_tap_count == 0) {
     // initial
     g_tempo_clock_count = 0;
@@ -407,14 +407,21 @@ inline void Tap(int8_t x) {
   ++g_tap_count;
 }
 
-inline void ToggleSequencer(int8_t x) { g_sequencer.Toggle(); }
+inline void ToggleSequencer() { g_sequencer.Toggle(); }
 
-inline void SequencerStandByRecording(int8_t x) { g_sequencer.StandByRecording(); }
+inline void SequencerStandByRecording() { g_sequencer.StandByRecording(); }
 
-template <void (*TriggerFunc)(int8_t)>
-void CheckSwitch(uint8_t prev_switches, uint8_t new_switches, uint8_t switch_bit, int8_t param) {
+template <void (*Func)()>
+void CheckSwitch(uint8_t prev_switches, uint8_t new_switches, uint8_t switch_bit) {
   if ((prev_switches & _BV(switch_bit)) && !(new_switches & _BV(switch_bit))) {
-    TriggerFunc(param);
+    Func();
+  }
+}
+
+template <Drum drum>
+void CheckDrumSwitch(uint8_t prev_switches, uint8_t new_switches, uint8_t switch_bit) {
+  if ((prev_switches & _BV(switch_bit)) && !(new_switches & _BV(switch_bit))) {
+    g_sequencer.Trigger<drum>(127);
   }
 }
 
@@ -423,18 +430,18 @@ void CheckSwitches(uint8_t prev_switches, uint8_t new_switches) {
     return;
   }
   if ((new_switches & _BV(BIT_SW_SHIFT)) == 0) {
-    CheckSwitch<Tap>(prev_switches, new_switches, BIT_SW_BASS_DRUM, 0);
-    CheckSwitch<SequencerStandByRecording>(prev_switches, new_switches, BIT_SW_DIN_MUTE, 127);
+    CheckSwitch<Tap>(prev_switches, new_switches, BIT_SW_BASS_DRUM);
+    CheckSwitch<SequencerStandByRecording>(prev_switches, new_switches, BIT_SW_DIN_MUTE);
     return;
   }
   g_tap_count = 0;
-  CheckSwitch<TriggerBassDrum>(prev_switches, new_switches, BIT_SW_BASS_DRUM, 127);
-  CheckSwitch<TriggerSnareDrum>(prev_switches, new_switches, BIT_SW_SNARE_DRUM, 127);
-  CheckSwitch<TriggerRimShot>(prev_switches, new_switches, BIT_SW_RIM_SHOT, 127);
-  CheckSwitch<TriggerHandClap>(prev_switches, new_switches, BIT_SW_HAND_CLAP, 127);
-  CheckSwitch<TriggerOpenHiHat>(prev_switches, new_switches, BIT_SW_OPEN_HI_HAT, 127);
-  CheckSwitch<TriggerClosedHiHat>(prev_switches, new_switches, BIT_SW_CLOSED_HI_HAT, 127);
-  CheckSwitch<ToggleSequencer>(prev_switches, new_switches, BIT_SW_DIN_MUTE, 127);
+  CheckDrumSwitch<Drum::kBassDrum>(prev_switches, new_switches, BIT_SW_BASS_DRUM);
+  CheckDrumSwitch<Drum::kSnareDrum>(prev_switches, new_switches, BIT_SW_SNARE_DRUM);
+  CheckDrumSwitch<Drum::kRimShot>(prev_switches, new_switches, BIT_SW_RIM_SHOT);
+  CheckDrumSwitch<Drum::kHandClap>(prev_switches, new_switches, BIT_SW_HAND_CLAP);
+  CheckDrumSwitch<Drum::kOpenHiHat>(prev_switches, new_switches, BIT_SW_OPEN_HI_HAT);
+  CheckDrumSwitch<Drum::kClosedHiHat>(prev_switches, new_switches, BIT_SW_CLOSED_HI_HAT);
+  CheckSwitch<ToggleSequencer>(prev_switches, new_switches, BIT_SW_DIN_MUTE);
 }
 
 template <typename InstrumentT>
