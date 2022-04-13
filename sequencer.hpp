@@ -72,12 +72,6 @@ class Sequencer {
 
   inline void Stop() { state_ = kStopping; }
 
-  inline void EndRecording() {
-    if (state_ == kRecording) {
-      state_ = kFinishingRecording;
-    }
-  }
-
   inline void Toggle() {
     if (state_ == kStandBy) {
       Start();
@@ -101,6 +95,14 @@ class Sequencer {
     ClearBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
   }
 
+  inline void EndRecording() {
+    if (state_ == kRecording) {
+      state_ = kFinishingRecording;
+      data_index_ = -2;
+      position_ = -1;
+    }
+  }
+
   void Clear() {
     for (int i = 0; i < kNumDrums; ++i) {
       last_triggers_[i] = 0;
@@ -113,7 +115,7 @@ class Sequencer {
   }
 
   template <Drum drum>
-  inline void Check(uint8_t index, uint8_t mask) {
+  inline void PlayPatternAt(uint8_t index, uint8_t mask) {
     constexpr uint8_t drum_index = static_cast<uint8_t>(drum);
     constexpr auto trigger_func = trigger_func_[drum_index];
     if (patterns_[drum_index][index] & mask) {
@@ -139,12 +141,12 @@ class Sequencer {
     }
     uint8_t byte = position_ >> 3;
     uint8_t mask = _BV(7 - (position_ & 0x7));
-    Check<Drum::kBassDrum>(byte, mask);
-    Check<Drum::kSnareDrum>(byte, mask);
-    Check<Drum::kRimShot>(byte, mask);
-    Check<Drum::kHandClap>(byte, mask);
-    Check<Drum::kClosedHiHat>(byte, mask);
-    Check<Drum::kOpenHiHat>(byte, mask);
+    PlayPatternAt<Drum::kBassDrum>(byte, mask);
+    PlayPatternAt<Drum::kSnareDrum>(byte, mask);
+    PlayPatternAt<Drum::kRimShot>(byte, mask);
+    PlayPatternAt<Drum::kHandClap>(byte, mask);
+    PlayPatternAt<Drum::kClosedHiHat>(byte, mask);
+    PlayPatternAt<Drum::kOpenHiHat>(byte, mask);
 
     if (state_ == kStopping && (position_ % kTicksPerBar) == (kTicksPerBar - 1)) {
       state_ = kStandBy;
@@ -156,6 +158,7 @@ class Sequencer {
       return;
     }
     if (position_ >= 0) {
+      // quantize
       *tempo_wrap_ = *tempo_clock_count_ - prev_clock_;
       auto margin = *tempo_wrap_ >> 1;
       if (prev_boundary_ == 0) {
@@ -165,8 +168,8 @@ class Sequencer {
       uint8_t byte = position_ >> 3;
       uint8_t mask = _BV(7 - (position_ & 0x7));
       for (auto i = 0; i < kNumDrums; ++i) {
-        auto trigger_clock = last_triggers_[i];
-        if (trigger_clock >= prev_boundary_ && trigger_clock < next_boundary) {
+        auto last_trigger = last_triggers_[i];
+        if (last_trigger >= prev_boundary_ && last_trigger < next_boundary) {
           patterns_[i][byte] |= mask;
           if (last_accent_ & _BV(i)) {
             accents_[i][byte] |= mask;
@@ -178,10 +181,9 @@ class Sequencer {
 
     prev_clock_ = *tempo_clock_count_;
     if (position_ == kTotalClockTicks - 1) {
-      state_ = kFinishingRecording;
+      // The position reached to the end, start saving the pattern.
       *tempo_wrap_ = (*tempo_clock_count_ - clock0_) / kTotalClockTicks;
-      data_index_ = -2;
-      position_ = -1;
+      EndRecording();
       return;
     } else {
       ++position_;
@@ -220,22 +222,21 @@ class Sequencer {
 
     switch (data_index_) {
       case -2:
-        eeprom_write_async(reinterpret_cast<uint8_t*>(E_TEMPO), (*tempo_wrap_) & 0xff);
+        eeprom_write_byte(reinterpret_cast<uint8_t*>(E_TEMPO), (*tempo_wrap_) & 0xff);
         break;
       case -1:
-        eeprom_write_async(reinterpret_cast<uint8_t*>(E_TEMPO) + 1, ((*tempo_wrap_) >> 8) & 0xff);
+        eeprom_write_byte(reinterpret_cast<uint8_t*>(E_TEMPO) + 1, ((*tempo_wrap_) >> 8) & 0xff);
         break;
       default:
-        if ((data_index_ & 8) == 0) {
+        if ((data_index_ & 4) == 0) {
           ToggleBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
         }
         if (data_index_ < kNumDrums * kPatternBytes) {
           uint8_t* ptr = &patterns_[0][0];
-          eeprom_write_async(E_PATTERN1 + data_index_, ptr[data_index_]);
+          eeprom_write_byte(E_PATTERN1 + data_index_, ptr[data_index_]);
         } else {
           uint8_t* ptr = &accents_[0][0];
-          eeprom_write_async(E_PATTERN1 + data_index_,
-                             ptr[data_index_ - kNumDrums * kPatternBytes]);
+          eeprom_write_byte(E_PATTERN1 + data_index_, ptr[data_index_ - kNumDrums * kPatternBytes]);
         }
     }
     if (++data_index_ == kNumDrums * kPatternBytes * 2) {
