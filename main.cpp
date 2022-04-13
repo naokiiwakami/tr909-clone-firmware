@@ -333,7 +333,7 @@ void SetUpMidi() {
 
 void StartupSequence() {
   volatile uint8_t prev_timer_value = 0;
-  uint8_t blink_left = 21;
+  uint8_t blink_left = 11;
   uint8_t midi_indicator = g_midi_channel + 0x1;
   uint8_t led_value = 0x80;
   uint16_t divider = 0;
@@ -341,7 +341,7 @@ void StartupSequence() {
     uint8_t current_timer_value = TCNT0;
     if (current_timer_value < prev_timer_value) {
       ++divider;
-      if (blink_left == 21) {
+      if (blink_left == 11) {
         if ((divider & 0x7f) == 0) {  // every 128 cycles = 16ms
           MapToLed(led_value);
           led_value >>= 1;
@@ -615,6 +615,7 @@ int main(void) {
         uint8_t current_switches = PORT_SWITCHES;
         CheckSwitches(prev_switches, current_switches);
         prev_switches = current_switches;
+        g_sequencer.Poll();
 
         if ((divider & 0x7f) == 0) {  // every 128 cycles = 16ms
           HandleAdc();

@@ -24,6 +24,7 @@ class Sequencer {
   uint8_t accents_[kNumDrums][kPatternBytes];
   uint32_t clock0_;
   uint32_t prev_clock_;
+  uint32_t prev_boundary_;
   uint32_t last_triggers_[kNumDrums];
   uint8_t last_accent_;
 
@@ -31,7 +32,8 @@ class Sequencer {
 
   uint8_t state_;
 
-  int data_index_;
+  // [-3] - inactive, [-2:0] - write the tempo, [0:] - write the pattern and the accents
+  int16_t data_index_;
 
   static constexpr void (*trigger_func_[])(int8_t) = {
       TriggerBassDrum, TriggerSnareDrum,   TriggerRimShot,
@@ -52,7 +54,8 @@ class Sequencer {
       : tempo_clock_count_{tempo_clock_count},
         tempo_wrap_{tempo_wrap},
         position_{-1},
-        state_{kStandBy} {
+        state_{kStandBy},
+        data_index_{-3} {
     Clear();
     for (auto idrum = 0; idrum < kNumDrums; ++idrum) {
       for (auto ipattern = 0; ipattern < kPatternBytes; ++ipattern) {
@@ -85,8 +88,9 @@ class Sequencer {
 
   inline void StandByRecording() {
     position_ = -1;
-    *tempo_clock_count_ = 0;
     state_ = kStandByRecording;
+    *tempo_clock_count_ = 0;
+    prev_boundary_ = 0;
     Clear();
   }
 
@@ -148,47 +152,36 @@ class Sequencer {
   }
 
   void StepForwardRecording() {
-    if (state_ != kRecording && state_ != kFinishingRecording) {
+    if (state_ != kRecording) {
       return;
     }
     if (position_ >= 0) {
       *tempo_wrap_ = *tempo_clock_count_ - prev_clock_;
       auto margin = *tempo_wrap_ >> 1;
+      if (prev_boundary_ == 0) {
+        prev_boundary_ = prev_clock_ - margin;
+      }
+      uint32_t next_boundary = prev_clock_ + margin;
       uint8_t byte = position_ >> 3;
       uint8_t mask = _BV(7 - (position_ & 0x7));
       for (auto i = 0; i < kNumDrums; ++i) {
         auto trigger_clock = last_triggers_[i];
-        if (trigger_clock >= prev_clock_ - margin && trigger_clock < prev_clock_ + margin) {
+        if (trigger_clock >= prev_boundary_ && trigger_clock < next_boundary) {
           patterns_[i][byte] |= mask;
           if (last_accent_ & _BV(i)) {
             accents_[i][byte] |= mask;
           }
         }
       }
+      prev_boundary_ = next_boundary;
     }
 
     prev_clock_ = *tempo_clock_count_;
     if (position_ == kTotalClockTicks - 1) {
-      EndRecording();
+      state_ = kFinishingRecording;
       *tempo_wrap_ = (*tempo_clock_count_ - clock0_) / kTotalClockTicks;
-      int i;
-      uint8_t* ptr = &patterns_[0][0];
-      for (i = 0; i < kNumDrums * kPatternBytes; ++i) {
-        if ((i & 4) == 0) {
-          ToggleBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
-        }
-        EEPROM_WRITE(E_PATTERN1 + i, ptr[i]);
-      }
-      ptr = &accents_[0][0];
-      for (i = 0; i < kNumDrums * kPatternBytes; ++i) {
-        if ((i & 4) == 0) {
-          ToggleBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
-        }
-        EEPROM_WRITE(E_PATTERN1 + i + kNumDrums * kPatternBytes, ptr[i]);
-      }
-      eeprom_write_word(E_TEMPO, *tempo_wrap_);
-      ClearBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
-      state_ = kStandBy;
+      data_index_ = -2;
+      position_ = -1;
       return;
     } else {
       ++position_;
@@ -217,6 +210,38 @@ class Sequencer {
       } else {
         last_accent_ &= ~_BV(drum_index);
       }
+    }
+  }
+
+  void Poll() {
+    if (data_index_ < -2 || !eeprom_is_ready()) {
+      return;
+    }
+
+    switch (data_index_) {
+      case -2:
+        eeprom_write_async(reinterpret_cast<uint8_t*>(E_TEMPO), (*tempo_wrap_) & 0xff);
+        break;
+      case -1:
+        eeprom_write_async(reinterpret_cast<uint8_t*>(E_TEMPO) + 1, ((*tempo_wrap_) >> 8) & 0xff);
+        break;
+      default:
+        if ((data_index_ & 8) == 0) {
+          ToggleBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
+        }
+        if (data_index_ < kNumDrums * kPatternBytes) {
+          uint8_t* ptr = &patterns_[0][0];
+          eeprom_write_async(E_PATTERN1 + data_index_, ptr[data_index_]);
+        } else {
+          uint8_t* ptr = &accents_[0][0];
+          eeprom_write_async(E_PATTERN1 + data_index_,
+                             ptr[data_index_ - kNumDrums * kPatternBytes]);
+        }
+    }
+    if (++data_index_ == kNumDrums * kPatternBytes * 2) {
+      data_index_ = -3;
+      ClearBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
+      state_ = kStandBy;
     }
   }
 };
