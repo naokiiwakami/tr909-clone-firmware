@@ -11,14 +11,14 @@ eeprom_write_async:
     ; Disable interrupts
     cli
     ; Set up the address (r18:r17) to address register
-    out     EEARH, r18
-    out     EEARL, r17
+    out     EEARH, r25
+    out     EEARL, r24
     ; Write data (r16) to Data register
-    out     EEDR, r16
+    out     EEDR, r22
     ; Write logical one to EEMWE
     sbi     EECR, EEMWE
     ; Start eeprom write by setting EEWE
-    sbi     0x1C, EEWE
+    sbi     EECR, EEWE
     ; Enable interrupts
     sei
     ret

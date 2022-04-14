@@ -407,9 +407,16 @@ inline void Tap() {
   ++g_tap_count;
 }
 
+inline void SequencerStandByRecording() { g_sequencer.StandByRecording(); }
+
 inline void ToggleSequencer() { g_sequencer.Toggle(); }
 
-inline void SequencerStandByRecording() { g_sequencer.StandByRecording(); }
+inline void OnShift() {
+  if (g_sequencer.GetState() & (Sequencer::kStandByRecording | Sequencer::kRecording)) {
+    g_sequencer.HardStop();
+    ClearBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
+  }
+}
 
 template <void (*Func)()>
 void CheckSwitch(uint8_t prev_switches, uint8_t new_switches, uint8_t switch_bit) {
@@ -430,6 +437,7 @@ void CheckSwitches(uint8_t prev_switches, uint8_t new_switches) {
     return;
   }
   if ((new_switches & _BV(BIT_SW_SHIFT)) == 0) {
+    CheckSwitch<OnShift>(prev_switches, new_switches, BIT_SW_SHIFT);
     CheckSwitch<Tap>(prev_switches, new_switches, BIT_SW_BASS_DRUM);
     CheckSwitch<SequencerStandByRecording>(prev_switches, new_switches, BIT_SW_DIN_MUTE);
     return;
@@ -520,7 +528,9 @@ void ParseMidiInput(uint8_t next_byte) {
         g_sequencer.StepForwardRecording();
         break;
       case MIDI_REALTIME_STOP:
-        g_sequencer.EndRecording();
+        if (g_sequencer.GetState() == Sequencer::kRecording) {
+          g_sequencer.EndRecording();
+        }
         break;
     }
     return;

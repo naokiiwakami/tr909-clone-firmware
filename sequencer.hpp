@@ -81,6 +81,8 @@ class Sequencer {
     }
   }
 
+  inline void HardStop() { state_ = kStandBy; }
+
   inline void StandByRecording() {
     position_ = -1;
     state_ = kStandByRecording;
@@ -97,11 +99,9 @@ class Sequencer {
   }
 
   inline void EndRecording() {
-    if (state_ == kRecording) {
-      state_ = kFinishingRecording;
-      data_index_ = -2;
-      position_ = -1;
-    }
+    state_ = kFinishingRecording;
+    data_index_ = -2;
+    position_ = -1;
   }
 
   void Clear() {
@@ -223,10 +223,10 @@ class Sequencer {
 
     switch (data_index_) {
       case -2:
-        eeprom_write_async(reinterpret_cast<uint8_t*>(E_TEMPO), (*tempo_wrap_) & 0xff);
+        eeprom_write_byte(reinterpret_cast<uint8_t*>(E_TEMPO), (*tempo_wrap_) & 0xff);
         break;
       case -1:
-        eeprom_write_async(reinterpret_cast<uint8_t*>(E_TEMPO) + 1, ((*tempo_wrap_) >> 8) & 0xff);
+        eeprom_write_byte(reinterpret_cast<uint8_t*>(E_TEMPO) + 1, ((*tempo_wrap_) >> 8) & 0xff);
         break;
       default:
         if ((data_index_ & 4) == 0) {
@@ -234,10 +234,10 @@ class Sequencer {
         }
         if (data_index_ < kTotalPatternBytes) {
           uint8_t* ptr = &patterns_[0][0];
-          eeprom_write_async(E_PATTERN1 + data_index_, ptr[data_index_]);
+          eeprom_write_byte(E_PATTERN1 + data_index_, ptr[data_index_]);
         } else {
           uint8_t* ptr = &accents_[0][0];
-          eeprom_write_async(E_PATTERN1 + data_index_, ptr[data_index_ - kTotalPatternBytes]);
+          eeprom_write_byte(E_PATTERN1 + data_index_, ptr[data_index_ - kTotalPatternBytes]);
         }
     }
     if (++data_index_ == kTotalPatternBytes * 2) {
