@@ -157,6 +157,9 @@
     <Compile Include="eeprom.hpp">
       <SubType>compile</SubType>
     </Compile>
+    <Compile Include="eeprom_write.S">
+      <SubType>compile</SubType>
+    </Compile>
     <Compile Include="hi_hat_wav.hpp">
       <SubType>compile</SubType>
     </Compile>

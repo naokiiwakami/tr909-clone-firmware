@@ -16,6 +16,7 @@ class Sequencer {
   static constexpr int kTicksPerBar = kTicksPerQuarterNote * 4;
   static constexpr int kTotalClockTicks = kNumBars * kTicksPerBar;
   static constexpr int kPatternBytes = kTotalClockTicks / 8;
+  static constexpr int kTotalPatternBytes = kNumDrums * kPatternBytes;
 
   uint32_t* tempo_clock_count_;
   uint16_t* tempo_wrap_;
@@ -61,7 +62,7 @@ class Sequencer {
       for (auto ipattern = 0; ipattern < kPatternBytes; ++ipattern) {
         auto* ptr = E_PATTERN1 + idrum * kPatternBytes + ipattern;
         patterns_[idrum][ipattern] = eeprom_read_byte(ptr);
-        accents_[idrum][ipattern] = eeprom_read_byte(ptr + kNumDrums * kPatternBytes);
+        accents_[idrum][ipattern] = eeprom_read_byte(ptr + kTotalPatternBytes);
       }
     }
   }
@@ -222,24 +223,24 @@ class Sequencer {
 
     switch (data_index_) {
       case -2:
-        eeprom_write_byte(reinterpret_cast<uint8_t*>(E_TEMPO), (*tempo_wrap_) & 0xff);
+        eeprom_write_async(reinterpret_cast<uint8_t*>(E_TEMPO), (*tempo_wrap_) & 0xff);
         break;
       case -1:
-        eeprom_write_byte(reinterpret_cast<uint8_t*>(E_TEMPO) + 1, ((*tempo_wrap_) >> 8) & 0xff);
+        eeprom_write_async(reinterpret_cast<uint8_t*>(E_TEMPO) + 1, ((*tempo_wrap_) >> 8) & 0xff);
         break;
       default:
         if ((data_index_ & 4) == 0) {
           ToggleBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
         }
-        if (data_index_ < kNumDrums * kPatternBytes) {
+        if (data_index_ < kTotalPatternBytes) {
           uint8_t* ptr = &patterns_[0][0];
-          eeprom_write_byte(E_PATTERN1 + data_index_, ptr[data_index_]);
+          eeprom_write_async(E_PATTERN1 + data_index_, ptr[data_index_]);
         } else {
           uint8_t* ptr = &accents_[0][0];
-          eeprom_write_byte(E_PATTERN1 + data_index_, ptr[data_index_ - kNumDrums * kPatternBytes]);
+          eeprom_write_async(E_PATTERN1 + data_index_, ptr[data_index_ - kTotalPatternBytes]);
         }
     }
-    if (++data_index_ == kNumDrums * kPatternBytes * 2) {
+    if (++data_index_ == kTotalPatternBytes * 2) {
       data_index_ = -3;
       ClearBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
       state_ = kStandBy;
