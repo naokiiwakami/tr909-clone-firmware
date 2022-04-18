@@ -403,6 +403,7 @@ inline void Tap() {
     SetBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
   } else {
     g_tempo_wrap = (g_tempo_clock_count / g_tap_count) / 48;
+    g_sequencer.EnableTempoWrapWriting();
   }
   ++g_tap_count;
 }

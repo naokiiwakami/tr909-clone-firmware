@@ -56,7 +56,7 @@ class Sequencer {
         tempo_wrap_{tempo_wrap},
         position_{-1},
         state_{kStandBy},
-        data_index_{-3} {
+        data_index_{-1} {
     Clear();
     for (auto idrum = 0; idrum < kNumDrums; ++idrum) {
       for (auto ipattern = 0; ipattern < kPatternBytes; ++ipattern) {
@@ -107,9 +107,11 @@ class Sequencer {
 
   inline void EndRecording() {
     state_ = kFinishingRecording;
-    data_index_ = -2;
+    data_index_ = 0;
     position_ = -1;
   }
+
+  inline void EnableTempoWrapWriting() { data_index_ = kTotalPatternBytes * 2; }
 
   void Clear() {
     for (int i = 0; i < kNumDrums; ++i) {
@@ -224,33 +226,31 @@ class Sequencer {
   }
 
   void Poll() {
-    if (data_index_ < -2 || !eeprom_is_ready()) {
+    if (data_index_ < 0 || !eeprom_is_ready()) {
       return;
     }
 
-    switch (data_index_) {
-      case -2:
-        eeprom_write_async(E_TEMPO, (*tempo_wrap_) & 0xff);
-        break;
-      case -1:
-        eeprom_write_async(E_TEMPO + 1, ((*tempo_wrap_) >> 8) & 0xff);
-        break;
-      default:
-        if ((data_index_ & 4) == 0) {
-          ToggleBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
-        }
-        if (data_index_ < kTotalPatternBytes) {
-          uint8_t* ptr = &patterns_[0][0];
-          eeprom_write_async(E_PATTERN1 + data_index_, ptr[data_index_]);
-        } else {
-          uint8_t* ptr = &accents_[0][0];
-          eeprom_write_async(E_PATTERN1 + data_index_, ptr[data_index_ - kTotalPatternBytes]);
-        }
+    if ((data_index_ & 4) == 0) {
+      ToggleBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
     }
-    if (++data_index_ == kTotalPatternBytes * 2) {
-      data_index_ = -3;
-      ClearBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
-      state_ = kStandBy;
+    if (data_index_ < kTotalPatternBytes) {
+      uint8_t* ptr = &patterns_[0][0];
+      eeprom_write_async(E_PATTERN1 + data_index_, ptr[data_index_]);
+    } else if (data_index_ < kTotalPatternBytes * 2) {
+      uint8_t* ptr = &accents_[0][0];
+      eeprom_write_async(E_PATTERN1 + data_index_, ptr[data_index_ - kTotalPatternBytes]);
+    } else if (data_index_ == kTotalPatternBytes * 2) {
+      eeprom_write_async(E_TEMPO, (*tempo_wrap_) & 0xff);
+    } else if (data_index_ == kTotalPatternBytes * 2 + 1) {
+      eeprom_write_async(E_TEMPO + 1, ((*tempo_wrap_) >> 8) & 0xff);
+    }
+
+    if (++data_index_ == kTotalPatternBytes * 2 + 2) {
+      data_index_ = -1;
+      if (state_ == kFinishingRecording) {
+        ClearBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
+        state_ = kStandBy;
+      }
     }
   }
 };
