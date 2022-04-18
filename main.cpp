@@ -191,7 +191,7 @@ void SetUpIo() {
   // PORT B and E
   DDRB = 0xff;
   DDRE = 0xff;
-  PORTB = 0;
+  PORTB = _BV(BIT_DIN_START) | _BV(BIT_DIN_CLOCK);
 
   // PORT C -- all switches
   DDRC = 0;
@@ -402,7 +402,7 @@ inline void Tap() {
     g_sequencer_position = (g_sequencer_position + 12) / 24 * 24;
     SetBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
   } else {
-    g_tempo_wrap = (g_tempo_clock_count / g_tap_count) / 24;
+    g_tempo_wrap = (g_tempo_clock_count / g_tap_count) / 48;
   }
   ++g_tap_count;
 }
@@ -617,7 +617,10 @@ int main(void) {
       ++divider;
       CheckInstruments();
       if (++tempo_counter == g_tempo_wrap) {
-        g_sequencer.StepForward();
+        ToggleBit(PORT_DIN_CLOCK, BIT_DIN_CLOCK);
+        if ((PORT_DIN_CLOCK & _BV(BIT_DIN_CLOCK)) == 0) {
+          g_sequencer.StepForward();
+        }
         tempo_counter = 0;
       }
       ++g_tempo_clock_count;

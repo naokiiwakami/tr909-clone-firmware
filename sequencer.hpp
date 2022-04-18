@@ -69,9 +69,17 @@ class Sequencer {
 
   inline uint8_t GetState() const { return state_; }
 
-  inline void Start() { state_ = kRunning; }
+  inline void Start() {
+    ClearBit(PORT_DIN_START, BIT_DIN_START);
+    state_ = kRunning;
+  }
 
   inline void Stop() { state_ = kStopping; }
+
+  inline void HardStop() {
+    SetBit(PORT_DIN_START, BIT_DIN_START);
+    state_ = kStandBy;
+  }
 
   inline void Toggle() {
     if (state_ == kStandBy) {
@@ -81,13 +89,12 @@ class Sequencer {
     }
   }
 
-  inline void HardStop() { state_ = kStandBy; }
-
   inline void StandByRecording() {
     position_ = -1;
     state_ = kStandByRecording;
     *tempo_clock_count_ = 0;
     prev_boundary_ = 0;
+    SetBit(PORT_DIN_START, BIT_DIN_START);
     Clear();
   }
 
@@ -150,7 +157,7 @@ class Sequencer {
     PlayPatternAt<Drum::kOpenHiHat>(byte, mask);
 
     if (state_ == kStopping && (position_ % kTicksPerBar) == (kTicksPerBar - 1)) {
-      state_ = kStandBy;
+      HardStop();
     }
   }
 
@@ -160,8 +167,8 @@ class Sequencer {
     }
     if (position_ >= 0) {
       // quantize
-      *tempo_wrap_ = *tempo_clock_count_ - prev_clock_;
-      auto margin = *tempo_wrap_ >> 1;
+      *tempo_wrap_ = (*tempo_clock_count_ - prev_clock_) >> 1;
+      auto margin = *tempo_wrap_;
       if (prev_boundary_ == 0) {
         prev_boundary_ = prev_clock_ - margin;
       }
@@ -183,7 +190,7 @@ class Sequencer {
     prev_clock_ = *tempo_clock_count_;
     if (position_ == kTotalClockTicks - 1) {
       // The position reached to the end, start saving the pattern.
-      *tempo_wrap_ = (*tempo_clock_count_ - clock0_) / kTotalClockTicks;
+      *tempo_wrap_ = (*tempo_clock_count_ - clock0_) / kTotalClockTicks / 2;
       EndRecording();
       return;
     } else {
