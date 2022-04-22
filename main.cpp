@@ -1,8 +1,5 @@
 /*
  * tr909_clone_firmware.cpp
- *
- * Created: 1/7/2022 8:00:11 PM
- * Author : naoki
  */
 
 #include <avr/interrupt.h>
@@ -20,7 +17,7 @@
 static constexpr uint32_t F_OSC = 16000000;  // 16 MHz
 
 // Sequencer ///////////////////////////////////////
-uint16_t g_tempo_wrap;
+uint16_t g_tempo_interval;
 uint16_t g_sequencer_position;
 
 // Instruments /////////////////////////////////////
@@ -368,7 +365,7 @@ void StartupSequence() {
 }
 
 void InitializeSequencer() {
-  g_tempo_wrap = eeprom_read_word(reinterpret_cast<uint16_t*>(E_TEMPO));
+  g_tempo_interval = eeprom_read_word(reinterpret_cast<uint16_t*>(E_TEMPO));
   g_sequencer_position = 0;
   SetBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
 }
@@ -388,24 +385,36 @@ void SetUp() {
 // Instrument control functions /////////////////////////////////////////////////
 
 static constexpr uint16_t TRIGGER_SHUTDOWN_AT = (255 - 16);  // 2.048 ms
+static constexpr uint8_t kTapHistory = 2;
 
-uint32_t g_tempo_clock_count = 0;
-
-Sequencer g_sequencer{&g_tempo_clock_count, &g_tempo_wrap};
-
+uint16_t g_tempo_clock_count = 0;
+uint16_t g_tempo_clocks[kTapHistory];
 uint8_t g_tap_count = 0;
+int8_t g_tap_current = 0;
+
+Sequencer g_sequencer{&g_tempo_clock_count, &g_tempo_interval};
 
 inline void Tap() {
   if (g_tap_count == 0) {
-    // initial
     g_tempo_clock_count = 0;
-    g_sequencer_position = (g_sequencer_position + 12) / 24 * 24;
+    g_tap_current = kTapHistory - 1;
     SetBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
   } else {
-    g_tempo_wrap = (g_tempo_clock_count / g_tap_count) / 48;
-    g_sequencer.EnableTempoWrapWriting();
+    int32_t diff =
+        g_tempo_clock_count - g_tempo_clocks[(g_tap_current + (g_tap_count - 1)) % kTapHistory];
+    if (diff < 0) {
+      diff += 0x10000;
+    }
+    diff /= g_tap_count * 48;
+    g_tempo_interval = diff;
+    if (--g_tap_current < 0) {
+      g_tap_current = kTapHistory - 1;
+    }
   }
-  ++g_tap_count;
+  g_tempo_clocks[g_tap_current] = g_tempo_clock_count;
+  if (g_tap_count < kTapHistory) {
+    ++g_tap_count;
+  }
 }
 
 inline void SequencerStandByRecording() { g_sequencer.StandByRecording(); }
@@ -443,7 +452,10 @@ void CheckSwitches(uint8_t prev_switches, uint8_t new_switches) {
     CheckSwitch<SequencerStandByRecording>(prev_switches, new_switches, BIT_SW_DIN_MUTE);
     return;
   }
-  g_tap_count = 0;
+  if (g_tap_count > 0) {
+    g_tap_count = 0;
+    g_sequencer.WriteTempoInterval();
+  }
   CheckDrumSwitch<Drum::kBassDrum>(prev_switches, new_switches, BIT_SW_BASS_DRUM);
   CheckDrumSwitch<Drum::kSnareDrum>(prev_switches, new_switches, BIT_SW_SNARE_DRUM);
   CheckDrumSwitch<Drum::kRimShot>(prev_switches, new_switches, BIT_SW_RIM_SHOT);
@@ -617,7 +629,7 @@ int main(void) {
     if (current_timer_value < prev_timer_value) {
       ++divider;
       CheckInstruments();
-      if (++tempo_counter == g_tempo_wrap) {
+      if (++tempo_counter >= g_tempo_interval) {
         ToggleBit(PORT_DIN_CLOCK, BIT_DIN_CLOCK);
         if ((PORT_DIN_CLOCK & _BV(BIT_DIN_CLOCK)) == 0) {
           g_sequencer.StepForward();

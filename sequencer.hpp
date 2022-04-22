@@ -18,8 +18,8 @@ class Sequencer {
   static constexpr int kPatternBytes = kTotalClockTicks / 8;
   static constexpr int kTotalPatternBytes = kNumDrums * kPatternBytes;
 
-  uint32_t* tempo_clock_count_;
-  uint16_t* tempo_wrap_;
+  uint16_t* tempo_clock_count_;
+  uint16_t* tempo_interval_;
 
   uint8_t patterns_[kNumDrums][kPatternBytes];
   uint8_t accents_[kNumDrums][kPatternBytes];
@@ -51,9 +51,9 @@ class Sequencer {
 
   inline uint8_t DrumIndex(Drum drum) { return static_cast<uint8_t>(drum); }
 
-  Sequencer(uint32_t* tempo_clock_count, uint16_t* tempo_wrap)
+  Sequencer(uint16_t* tempo_clock_count, uint16_t* tempo_wrap)
       : tempo_clock_count_{tempo_clock_count},
-        tempo_wrap_{tempo_wrap},
+        tempo_interval_{tempo_wrap},
         position_{-1},
         state_{kStandBy},
         data_index_{-1} {
@@ -68,6 +68,8 @@ class Sequencer {
   }
 
   inline uint8_t GetState() const { return state_; }
+
+  inline uint16_t GetPosition() const { return position_; }
 
   inline void Start() {
     ClearBit(PORT_DIN_START, BIT_DIN_START);
@@ -111,7 +113,7 @@ class Sequencer {
     position_ = -1;
   }
 
-  inline void EnableTempoWrapWriting() { data_index_ = kTotalPatternBytes * 2; }
+  inline void WriteTempoInterval() { data_index_ = kTotalPatternBytes * 2; }
 
   void Clear() {
     for (int i = 0; i < kNumDrums; ++i) {
@@ -169,8 +171,8 @@ class Sequencer {
     }
     if (position_ >= 0) {
       // quantize
-      *tempo_wrap_ = (*tempo_clock_count_ - prev_clock_) >> 1;
-      auto margin = *tempo_wrap_;
+      *tempo_interval_ = (*tempo_clock_count_ - prev_clock_) >> 1;
+      auto margin = *tempo_interval_;
       if (prev_boundary_ == 0) {
         prev_boundary_ = prev_clock_ - margin;
       }
@@ -192,7 +194,7 @@ class Sequencer {
     prev_clock_ = *tempo_clock_count_;
     if (position_ == kTotalClockTicks - 1) {
       // The position reached to the end, start saving the pattern.
-      *tempo_wrap_ = (*tempo_clock_count_ - clock0_) / kTotalClockTicks / 2;
+      *tempo_interval_ = (*tempo_clock_count_ - clock0_) / kTotalClockTicks / 2;
       EndRecording();
       return;
     } else {
@@ -240,9 +242,9 @@ class Sequencer {
       uint8_t* ptr = &accents_[0][0];
       eeprom_write_async(E_PATTERN1 + data_index_, ptr[data_index_ - kTotalPatternBytes]);
     } else if (data_index_ == kTotalPatternBytes * 2) {
-      eeprom_write_async(E_TEMPO, (*tempo_wrap_) & 0xff);
+      eeprom_write_async(E_TEMPO, (*tempo_interval_) & 0xff);
     } else if (data_index_ == kTotalPatternBytes * 2 + 1) {
-      eeprom_write_async(E_TEMPO + 1, ((*tempo_wrap_) >> 8) & 0xff);
+      eeprom_write_async(E_TEMPO + 1, ((*tempo_interval_) >> 8) & 0xff);
     }
 
     if (++data_index_ == kTotalPatternBytes * 2 + 2) {

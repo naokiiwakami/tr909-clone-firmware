@@ -52,7 +52,6 @@ typedef struct hi_hat {
   uint8_t tcnt2_on_overflow;
 } hi_hat_t;
 
-
 extern bass_drum_t g_bass_drum;
 extern snare_drum_t g_snare_drum;
 extern rim_shot_t g_rim_shot;
@@ -127,9 +126,9 @@ void TriggerHandClap(int8_t velocity) {
 
 // Triggering Hi-Hats
 template <void (*OpenHiHatLedFunc)(volatile uint8_t&, const uint8_t),
-void (*ClosedHiHatLedFunc)(volatile uint8_t&, const uint8_t),
-void (*HiHatSelectFunc)(volatile uint8_t&, const uint8_t), uint16_t pcm_start,
-uint16_t pcm_end>
+          void (*ClosedHiHatLedFunc)(volatile uint8_t&, const uint8_t),
+          void (*HiHatSelectFunc)(volatile uint8_t&, const uint8_t), uint16_t pcm_start,
+          uint16_t pcm_end>
 void TriggerHiHat(int8_t velocity) {
   REGISTER_VELOCITY_HI_HAT = velocity + 128;
   SetBit(PORT_TRIG_HI_HAT, BIT_TRIG_HI_HAT);
