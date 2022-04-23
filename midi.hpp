@@ -1,7 +1,9 @@
 /*
  * midi_message.h
  */
+#include <avr/io.h>
 
+#include "eeprom.hpp"
 #include "sequencer.hpp"
 #include "system.hpp"
 
@@ -43,6 +45,8 @@ class MidiReceiver {
 
  public:
   MidiReceiver() {}
+
+  void Initialize();
 
   inline uint8_t GetChannel() const { return listening_channel_; }
   inline void SetChannel(uint8_t channel) { listening_channel_ = channel; }
@@ -121,5 +125,21 @@ class MidiReceiver {
     }
   }
 };
+
+extern MidiReceiver g_midi_receiver;
+
+void MidiReceiver::Initialize() {
+  // Set baud rate
+  UBRR1H = static_cast<uint8_t>((USART_BAUD_SELECT >> 8) & 0xff);
+  UBRR1L = static_cast<uint8_t>(USART_BAUD_SELECT & 0xff);
+
+  // Enable receiver
+  UCSR1B = _BV(RXEN1);
+
+  // Set frame format: asynchronous operation, parity disabled, 8 data, 1 stop bit */
+  UCSR1C = _BV(UCSZ11) | _BV(UCSZ10);
+
+  SetChannel(eeprom_read_byte(E_MIDI_CH));
+}
 
 #endif /* MIDI_MESSAGE_HPP_ */

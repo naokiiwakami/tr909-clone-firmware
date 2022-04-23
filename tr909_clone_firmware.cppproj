@@ -154,6 +154,9 @@
     </ToolchainSettings>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="adc.hpp">
+      <SubType>compile</SubType>
+    </Compile>
     <Compile Include="eeprom.hpp">
       <SubType>compile</SubType>
     </Compile>
@@ -176,6 +179,9 @@
       <SubType>compile</SubType>
     </Compile>
     <Compile Include="sequencer.hpp">
+      <SubType>compile</SubType>
+    </Compile>
+    <Compile Include="system.hpp">
       <SubType>compile</SubType>
     </Compile>
     <Compile Include="utils.hpp">

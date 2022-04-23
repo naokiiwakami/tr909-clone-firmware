@@ -5,6 +5,7 @@
 #ifndef INSTRUMENTS_H_
 #define INSTRUMENTS_H_
 
+#include "hi_hat_wav.hpp"
 #include "ports.hpp"
 #include "utils.hpp"
 

@@ -5,6 +5,7 @@
 #include <avr/interrupt.h>
 #include <avr/io.h>
 
+#include "adc.hpp"
 #include "eeprom.hpp"
 #include "hi_hat_wav.hpp"
 #include "instruments.hpp"
@@ -186,51 +187,9 @@ void SetUpIo() {
   PORTG = 0;
 }
 
-uint8_t g_adc_current_channel = 0;
-bool g_adc_ready_to_read = false;
-
-void SetUpAdc() {
-  g_adc_current_channel = ADMUX_HI_HAT;
-  /*
-   * ADC Multiplexer Selection Register
-   */
-  // voltage reference: AREF (REFS = 00)
-  // ADC Left Adjust Result: off (ADLAR = 0)
-  // Channel is set f| or hi-hat (ADC0)
-  ADMUX = g_adc_current_channel;
-
-  /*
-   * ADC Control and Status Register A
-   */
-  // clang-format off
-  ADCSRA = _BV(ADEN)  // ADC ENable
-    // | _BV(ADSC)    // ADC Start Conversion
-    // | _BV(ADATE)   // ADC Auto Trigger Enable
-    // | _BV(ADIF)    // ADC Interrupt Flag
-    // | _BV(ADIE)    // ADC Interrupt Enable
-    | _BV(ADPS2)      // ADC Prescaler Select Bits. '111' is 128 that gives 125 kHz for 16MHz clock
-    | _BV(ADPS1)
-    | _BV(ADPS0);
-  // clang-format on
-
-  g_adc_ready_to_read = false;
-}
+Adc g_adc{};
 
 MidiReceiver g_midi_receiver{};
-
-void SetupMidi() {
-  // Set baud rate
-  UBRR1H = static_cast<uint8_t>((USART_BAUD_SELECT >> 8) & 0xff);
-  UBRR1L = static_cast<uint8_t>(USART_BAUD_SELECT & 0xff);
-
-  // Enable receiver
-  UCSR1B = _BV(RXEN1);
-
-  // Set frame format: asynchronous operation, parity disabled, 8 data, 1 stop bit */
-  UCSR1C = _BV(UCSZ11) | _BV(UCSZ10);
-
-  g_midi_receiver.SetChannel(eeprom_read_byte(E_MIDI_CH));
-}
 
 /**
  * Turn on/off LEDs as reflections of bits in the value.
@@ -345,19 +304,14 @@ void StartupSequence() {
   MapToLed(0);
 }
 
-void InitializeSequencer() {
-  g_tempo_interval = eeprom_read_word(reinterpret_cast<uint16_t*>(E_TEMPO));
-  SetBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
-}
-
 void SetUp() {
   InitializeEEPROM();
   InitializeInstruments();
   SetUpTimer();
   SetUpIo();
-  SetUpAdc();
-  SetupMidi();
-  InitializeSequencer();
+  g_adc.Initialize();
+  g_midi_receiver.Initialize();
+  g_sequencer.Initialize();
 
   sei();
 }
@@ -481,31 +435,6 @@ void CheckInstruments() {
   }
 }
 
-void HandleAdc() {
-  if (!g_adc_ready_to_read) {
-    // set the next ADC channel
-    ADMUX &= 0xF0;
-    ADMUX |= g_adc_current_channel;
-    // start ADC
-    ADCSRA |= _BV(ADSC);
-    g_adc_ready_to_read = true;  // the value would be read in the next cycle
-  } else if ((ADCSRA & _BV(ADSC)) == 0) {
-    switch (g_adc_current_channel) {
-      case ADMUX_HI_HAT:
-        SetHiHatTune(ADC >> 4);
-        break;
-      case ADMUX_SNARE_DRUM:
-        REGISTER_TUNE_SNARE_DRUM = (ADC >> 4) + 38;  // 38 to 102, CV range about 0.7V to 2V
-        break;
-      case ADMUX_BASS_DRUM:
-        REGISTER_TUNE_BASS_DRUM = (ADC >> 2);  // CV rail to rail, range 0V to 5V
-        break;
-    }
-    g_adc_ready_to_read = false;
-    g_adc_current_channel = (g_adc_current_channel + 1) % ADMUX_NUM_CHANNELS;
-  }
-}
-
 // The main program /////////////////////////////////////////
 
 int main(void) {
@@ -549,7 +478,7 @@ int main(void) {
         g_sequencer.Poll();
 
         if ((divider & 0x7f) == 0) {  // every 128 cycles = 16ms
-          HandleAdc();
+          g_adc.Update();
         }
       }
     }

@@ -5,6 +5,7 @@
 #ifndef SEQUENCER_HPP_
 #define SEQUENCER_HPP_
 
+#include "eeprom.hpp"
 #include "instruments.hpp"
 #include "utils.hpp"
 
@@ -58,6 +59,9 @@ class Sequencer {
         state_{kStandBy},
         data_index_{-1} {
     Clear();
+  }
+
+  void Initialize() {
     for (auto idrum = 0; idrum < kNumDrums; ++idrum) {
       for (auto ipattern = 0; ipattern < kPatternBytes; ++ipattern) {
         auto* ptr = reinterpret_cast<uint8_t*>(E_PATTERN1) + idrum * kPatternBytes + ipattern;
@@ -65,6 +69,8 @@ class Sequencer {
         accents_[idrum][ipattern] = eeprom_read_byte(ptr + kTotalPatternBytes);
       }
     }
+    *tempo_interval_ = eeprom_read_word(reinterpret_cast<uint16_t*>(E_TEMPO));
+    SetBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
   }
 
   inline uint8_t GetState() const { return state_; }
