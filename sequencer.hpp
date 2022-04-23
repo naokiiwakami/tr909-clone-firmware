@@ -257,4 +257,6 @@ class Sequencer {
   }
 };
 
+extern Sequencer g_sequencer;
+
 #endif /* SEQUENCER_HPP_ */

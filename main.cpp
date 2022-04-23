@@ -8,17 +8,14 @@
 #include "eeprom.hpp"
 #include "hi_hat_wav.hpp"
 #include "instruments.hpp"
-#include "midi_message.hpp"
+#include "midi.hpp"
 #include "ports.hpp"
 #include "sequencer.hpp"
+#include "system.hpp"
 #include "utils.hpp"
-
-// System clock frequency
-static constexpr uint32_t F_OSC = 16000000;  // 16 MHz
 
 // Sequencer ///////////////////////////////////////
 uint16_t g_tempo_interval;
-uint16_t g_sequencer_position;
 
 // Instruments /////////////////////////////////////
 bass_drum_t g_bass_drum;
@@ -26,24 +23,6 @@ snare_drum_t g_snare_drum;
 rim_shot_t g_rim_shot;
 hand_clap_t g_hand_clap;
 hi_hat_t g_hi_hat;
-
-// MIDI ////////////////////////////////////////////
-static constexpr uint32_t USART_BAUD_RATE = 31250;
-static constexpr uint8_t USART_BUF_SIZE = 16;  // must be power of 2
-static constexpr uint16_t USART_BAUD_SELECT = (F_OSC / (USART_BAUD_RATE * 16) - 1);
-
-struct MidiMessage {
-  uint8_t status = 0;
-  uint8_t channel = 0;
-  uint8_t data[2] = {0, 0};
-  uint8_t data_length_mask = 0;
-  uint8_t data_pointer = 0;
-
-  MidiMessage() {}
-};
-
-static MidiMessage g_midi_message;
-static uint8_t g_midi_channel;
 
 // Initializers //////////////////////////////////////////
 
@@ -237,6 +216,8 @@ void SetUpAdc() {
   g_adc_ready_to_read = false;
 }
 
+MidiReceiver g_midi_receiver{};
+
 void SetupMidi() {
   // Set baud rate
   UBRR1H = static_cast<uint8_t>((USART_BAUD_SELECT >> 8) & 0xff);
@@ -248,8 +229,7 @@ void SetupMidi() {
   // Set frame format: asynchronous operation, parity disabled, 8 data, 1 stop bit */
   UCSR1C = _BV(UCSZ11) | _BV(UCSZ10);
 
-  // TODO: Read from eeprom
-  g_midi_channel = eeprom_read_byte(E_MIDI_CH);
+  g_midi_receiver.SetChannel(eeprom_read_byte(E_MIDI_CH));
 }
 
 /**
@@ -291,7 +271,7 @@ bool CheckSwitchesMidi(uint8_t prev_switches, uint8_t new_switches, uint8_t* mid
  * The MIDI channel is stored into the eeprom before leaving.
  */
 void SetUpMidi() {
-  uint8_t midi_indicator = g_midi_channel + 0x1;
+  uint8_t midi_indicator = g_midi_receiver.GetChannel() + 0x1;
   volatile uint8_t prev_timer_value = 0;
   volatile uint16_t divider = 0;
   uint8_t led_value = 0;
@@ -306,8 +286,9 @@ void SetUpMidi() {
           uint8_t current_switches = PORT_SWITCHES;
           if (CheckSwitchesMidi(prev_switches, current_switches, &midi_indicator)) {
             MapToLed(midi_indicator);
-            g_midi_channel = midi_indicator - 1;
-            eeprom_write_byte(E_MIDI_CH, g_midi_channel);
+            uint8_t midi_channel = midi_indicator - 1;
+            g_midi_receiver.SetChannel(midi_channel);
+            eeprom_write_byte(E_MIDI_CH, midi_channel);
             countdown = 32;
           } else {
             MapToLed(led_value);
@@ -331,7 +312,7 @@ void SetUpMidi() {
 void StartupSequence() {
   volatile uint8_t prev_timer_value = 0;
   uint8_t blink_left = 11;
-  uint8_t midi_indicator = g_midi_channel + 0x1;
+  uint8_t midi_indicator = g_midi_receiver.GetChannel() + 0x1;
   uint8_t led_value = 0x80;
   uint16_t divider = 0;
   while (blink_left > 0) {
@@ -366,7 +347,6 @@ void StartupSequence() {
 
 void InitializeSequencer() {
   g_tempo_interval = eeprom_read_word(reinterpret_cast<uint16_t*>(E_TEMPO));
-  g_sequencer_position = 0;
   SetBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
 }
 
@@ -526,82 +506,7 @@ void HandleAdc() {
   }
 }
 
-// MIDI parser /////////////////////////////////////////
-static void ProcessMidiChannelMessage();
-
-void ParseMidiInput(uint8_t next_byte) {
-  if (next_byte >= 0xf0) {
-    switch (next_byte) {
-      case MIDI_REALTIME_START:
-        if (g_sequencer.GetState() == Sequencer::kStandByRecording) {
-          g_sequencer.StartRecording();
-        }
-        break;
-      case MIDI_REALTIME_CLOCK:
-        g_sequencer.StepForwardRecording();
-        break;
-      case MIDI_REALTIME_STOP:
-        if (g_sequencer.GetState() == Sequencer::kRecording) {
-          g_sequencer.EndRecording();
-        }
-        break;
-    }
-    return;
-  }
-  if (next_byte > 0x7f) {  // is status byte
-    g_midi_message.status = next_byte & 0xf0;
-    g_midi_message.channel = next_byte & 0x0f;
-    switch (g_midi_message.status) {
-      case MIDI_PROGRAM_CHANGE:
-      case MIDI_CHANNEL_PRESSURE:
-        g_midi_message.data_length_mask = 0;
-        break;
-      default:
-        g_midi_message.data_length_mask = 1;
-    }
-    g_midi_message.data_pointer = 0;
-  } else {  // data byte
-    g_midi_message.data[g_midi_message.data_pointer & 0x1] = next_byte;
-    if ((++g_midi_message.data_pointer & g_midi_message.data_length_mask) == 0) {
-      if (g_midi_message.channel == g_midi_channel) {
-        ProcessMidiChannelMessage();
-      }
-    }
-  }
-}
-
-void ProcessMidiChannelMessage() {
-  switch (g_midi_message.status) {
-    case MIDI_NOTE_ON: {
-      auto& velocity = g_midi_message.data[1];
-      if (velocity == 0) {
-        // this is actually a note-off message
-        break;
-      }
-      auto& note = g_midi_message.data[0];
-      switch (note) {
-        case MIDI_NOTE_BASS_DRUM:
-          g_sequencer.Trigger<Drum::kBassDrum>(velocity);
-          break;
-        case MIDI_NOTE_SNARE_DRUM:
-          g_sequencer.Trigger<Drum::kSnareDrum>(velocity);
-          break;
-        case MIDI_NOTE_RIM_SHOT:
-          g_sequencer.Trigger<Drum::kRimShot>(velocity);
-          break;
-        case MIDI_NOTE_HAND_CLAP:
-          g_sequencer.Trigger<Drum::kHandClap>(velocity);
-          break;
-        case MIDI_NOTE_CLOSED_HI_HAT:
-          g_sequencer.Trigger<Drum::kClosedHiHat>(velocity);
-          break;
-        case MIDI_NOTE_OPEN_HI_HAT:
-          g_sequencer.Trigger<Drum::kOpenHiHat>(velocity);
-          break;
-      }
-    } break;
-  }
-}
+// The main program /////////////////////////////////////////
 
 int main(void) {
   SetUp();
@@ -621,7 +526,7 @@ int main(void) {
   while (1) {
     // Check MIDI input
     while (UCSR1A & _BV(RXC1)) {
-      ParseMidiInput(UDR1);
+      g_midi_receiver.ParseMidiInput(UDR1);
     }
 
     // Check the master app clock

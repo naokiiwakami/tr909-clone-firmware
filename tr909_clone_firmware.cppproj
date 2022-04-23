@@ -169,7 +169,7 @@
     <Compile Include="main.cpp">
       <SubType>compile</SubType>
     </Compile>
-    <Compile Include="midi_message.hpp">
+    <Compile Include="midi.hpp">
       <SubType>compile</SubType>
     </Compile>
     <Compile Include="ports.hpp">
