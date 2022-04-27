@@ -19,8 +19,13 @@ class Sequencer {
   static constexpr int kPatternBytes = kTotalClockTicks / 8;
   static constexpr int kTotalPatternBytes = kNumDrums * kPatternBytes;
 
-  uint16_t* tempo_clock_count_;
-  uint16_t* tempo_interval_;
+  static constexpr uint8_t kTapHistory = 2;
+
+  uint16_t tempo_clock_count_;
+  uint16_t tempo_interval_;
+  uint8_t tap_count_;
+  int8_t tap_current_;
+  uint16_t tempo_clocks_[kTapHistory];
 
   uint8_t patterns_[kNumDrums][kPatternBytes];
   uint8_t accents_[kNumDrums][kPatternBytes];
@@ -52,9 +57,10 @@ class Sequencer {
 
   inline uint8_t DrumIndex(Drum drum) { return static_cast<uint8_t>(drum); }
 
-  Sequencer(uint16_t* tempo_clock_count, uint16_t* tempo_wrap)
-      : tempo_clock_count_{tempo_clock_count},
-        tempo_interval_{tempo_wrap},
+  Sequencer()
+      : tempo_clock_count_{0},
+        tap_count_{0},
+        tap_current_{0},
         position_{-1},
         state_{kStandBy},
         data_index_{-1} {
@@ -69,13 +75,20 @@ class Sequencer {
         accents_[idrum][ipattern] = eeprom_read_byte(ptr + kTotalPatternBytes);
       }
     }
-    *tempo_interval_ = eeprom_read_word(reinterpret_cast<uint16_t*>(E_TEMPO));
+    tempo_interval_ = eeprom_read_word(reinterpret_cast<uint16_t*>(E_TEMPO));
     SetBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
   }
 
   inline uint8_t GetState() const { return state_; }
 
   inline uint16_t GetPosition() const { return position_; }
+
+  inline uint8_t GetTapCount() const { return tap_count_; }
+  inline void ResetTapCount() { tap_count_ = 0; }
+
+  inline uint16_t GetTempoInterval() const { return tempo_interval_; }
+
+  inline void IncrementClock() { ++tempo_clock_count_; }
 
   inline void Start() {
     ClearBit(PORT_DIN_START, BIT_DIN_START);
@@ -100,7 +113,7 @@ class Sequencer {
   inline void StandByRecording() {
     position_ = -1;
     state_ = kStandByRecording;
-    *tempo_clock_count_ = 0;
+    tempo_clock_count_ = 0;
     prev_boundary_ = 0;
     SetBit(PORT_DIN_START, BIT_DIN_START);
     Clear();
@@ -108,7 +121,8 @@ class Sequencer {
 
   inline void StartRecording() {
     state_ = kRecording;
-    prev_clock_ = *tempo_clock_count_;
+    prev_clock_ = tempo_clock_count_;
+    tap_count_ = 0;
     clock0_ = prev_clock_;
     ClearBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
   }
@@ -177,8 +191,8 @@ class Sequencer {
     }
     if (position_ >= 0) {
       // quantize
-      *tempo_interval_ = (*tempo_clock_count_ - prev_clock_) >> 1;
-      auto margin = *tempo_interval_;
+      tempo_interval_ = (tempo_clock_count_ - prev_clock_) >> 1;
+      auto margin = tempo_interval_;
       if (prev_boundary_ == 0) {
         prev_boundary_ = prev_clock_ - margin;
       }
@@ -197,19 +211,24 @@ class Sequencer {
       prev_boundary_ = next_boundary;
     }
 
-    prev_clock_ = *tempo_clock_count_;
     if (position_ == kTotalClockTicks - 1) {
-      // The position reached to the end, start saving the pattern.
-      *tempo_interval_ = (*tempo_clock_count_ - clock0_) / kTotalClockTicks / 2;
+      int32_t diff = tempo_clock_count_ - clock0_;
+      if (diff < 0) {
+        diff += 0x10000;
+      }
+      tempo_interval_ = diff / 24 / 2;
+
       EndRecording();
       return;
     } else {
       ++position_;
     }
+    prev_clock_ = tempo_clock_count_;
 
     // blink the tempo indicator
     auto mod = position_ % kTicksPerQuarterNote;
     if (mod == 0) {
+      clock0_ = tempo_clock_count_;
       SetBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
     } else if (mod == 3) {
       ClearBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
@@ -224,12 +243,36 @@ class Sequencer {
       trigger_func(velocity);
     }
     if (state_ == kRecording || state_ == kStandByRecording) {
-      last_triggers_[drum_index] = *tempo_clock_count_;
+      last_triggers_[drum_index] = tempo_clock_count_;
       if (velocity >= 96) {
         last_accent_ |= _BV(drum_index);
       } else {
         last_accent_ &= ~_BV(drum_index);
       }
+    }
+  }
+
+  inline void Tap() {
+    if (tap_count_ == 0) {
+      tempo_clock_count_ = 0;
+      tap_current_ = kTapHistory - 1;
+      SetBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
+    } else {
+      int32_t diff =
+          tempo_clock_count_ - tempo_clocks_[(tap_current_ + (tap_count_ - 1)) % kTapHistory];
+      if (diff < 0) {
+        diff += 0x10000;
+      }
+      diff /= tap_count_ * 48;
+      tempo_interval_ = diff;
+
+      if (--tap_current_ < 0) {
+        tap_current_ = kTapHistory - 1;
+      }
+    }
+    tempo_clocks_[tap_current_] = tempo_clock_count_;
+    if (tap_count_ < kTapHistory) {
+      ++tap_count_;
     }
   }
 
@@ -248,9 +291,9 @@ class Sequencer {
       uint8_t* ptr = &accents_[0][0];
       eeprom_write_async(E_PATTERN1 + data_index_, ptr[data_index_ - kTotalPatternBytes]);
     } else if (data_index_ == kTotalPatternBytes * 2) {
-      eeprom_write_async(E_TEMPO, (*tempo_interval_) & 0xff);
+      eeprom_write_async(E_TEMPO, (tempo_interval_)&0xff);
     } else if (data_index_ == kTotalPatternBytes * 2 + 1) {
-      eeprom_write_async(E_TEMPO + 1, ((*tempo_interval_) >> 8) & 0xff);
+      eeprom_write_async(E_TEMPO + 1, ((tempo_interval_) >> 8) & 0xff);
     }
 
     if (++data_index_ == kTotalPatternBytes * 2 + 2) {

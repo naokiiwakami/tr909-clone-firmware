@@ -15,9 +15,6 @@
 #include "system.hpp"
 #include "utils.hpp"
 
-// Sequencer ///////////////////////////////////////
-uint16_t g_tempo_interval;
-
 // Instruments /////////////////////////////////////
 bass_drum_t g_bass_drum;
 snare_drum_t g_snare_drum;
@@ -321,35 +318,9 @@ void SetUp() {
 static constexpr uint16_t TRIGGER_SHUTDOWN_AT = (255 - 16);  // 2.048 ms
 static constexpr uint8_t kTapHistory = 2;
 
-uint16_t g_tempo_clock_count = 0;
-uint16_t g_tempo_clocks[kTapHistory];
-uint8_t g_tap_count = 0;
-int8_t g_tap_current = 0;
+Sequencer g_sequencer{};
 
-Sequencer g_sequencer{&g_tempo_clock_count, &g_tempo_interval};
-
-inline void Tap() {
-  if (g_tap_count == 0) {
-    g_tempo_clock_count = 0;
-    g_tap_current = kTapHistory - 1;
-    SetBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
-  } else {
-    int32_t diff =
-        g_tempo_clock_count - g_tempo_clocks[(g_tap_current + (g_tap_count - 1)) % kTapHistory];
-    if (diff < 0) {
-      diff += 0x10000;
-    }
-    diff /= g_tap_count * 48;
-    g_tempo_interval = diff;
-    if (--g_tap_current < 0) {
-      g_tap_current = kTapHistory - 1;
-    }
-  }
-  g_tempo_clocks[g_tap_current] = g_tempo_clock_count;
-  if (g_tap_count < kTapHistory) {
-    ++g_tap_count;
-  }
-}
+inline void Tap() { g_sequencer.Tap(); }
 
 inline void SequencerStandByRecording() { g_sequencer.StandByRecording(); }
 
@@ -386,8 +357,8 @@ void CheckSwitches(uint8_t prev_switches, uint8_t new_switches) {
     CheckSwitch<SequencerStandByRecording>(prev_switches, new_switches, BIT_SW_DIN_MUTE);
     return;
   }
-  if (g_tap_count > 0) {
-    g_tap_count = 0;
+  if (g_sequencer.GetTapCount() > 0) {
+    g_sequencer.ResetTapCount();
     g_sequencer.WriteTempoInterval();
   }
   CheckDrumSwitch<Drum::kBassDrum>(prev_switches, new_switches, BIT_SW_BASS_DRUM);
@@ -463,14 +434,14 @@ int main(void) {
     if (current_timer_value < prev_timer_value) {
       ++divider;
       CheckInstruments();
-      if (++tempo_counter >= g_tempo_interval) {
+      if (++tempo_counter >= g_sequencer.GetTempoInterval()) {
         ToggleBit(PORT_DIN_CLOCK, BIT_DIN_CLOCK);
         if ((PORT_DIN_CLOCK & _BV(BIT_DIN_CLOCK)) == 0) {
           g_sequencer.StepForward();
         }
         tempo_counter = 0;
       }
-      ++g_tempo_clock_count;
+      g_sequencer.IncrementClock();
       if ((divider & 0x3f) == 0) {  // every 64 cycles = 8ms
         uint8_t current_switches = PORT_SWITCHES;
         CheckSwitches(prev_switches, current_switches);
