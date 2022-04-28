@@ -216,7 +216,7 @@ class Sequencer {
       if (diff < 0) {
         diff += 0x10000;
       }
-      tempo_interval_ = diff / 24 / 2;
+      tempo_interval_ = diff / 24;
 
       EndRecording();
       return;
@@ -263,7 +263,7 @@ class Sequencer {
       if (diff < 0) {
         diff += 0x10000;
       }
-      diff /= tap_count_ * 48;
+      diff /= tap_count_ * 24;
       tempo_interval_ = diff;
 
       if (--tap_current_ < 0) {

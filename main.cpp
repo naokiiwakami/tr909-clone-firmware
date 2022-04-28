@@ -435,11 +435,11 @@ int main(void) {
       ++divider;
       CheckInstruments();
       if (++tempo_counter >= g_sequencer.GetTempoInterval()) {
-        ToggleBit(PORT_DIN_CLOCK, BIT_DIN_CLOCK);
-        if ((PORT_DIN_CLOCK & _BV(BIT_DIN_CLOCK)) == 0) {
-          g_sequencer.StepForward();
-        }
+        ClearBit(PORT_DIN_CLOCK, BIT_DIN_CLOCK);
+        g_sequencer.StepForward();
         tempo_counter = 0;
+      } else if (tempo_counter >= (g_sequencer.GetTempoInterval() >> 1)) {
+        SetBit(PORT_DIN_CLOCK, BIT_DIN_CLOCK);
       }
       g_sequencer.IncrementClock();
       if ((divider & 0x3f) == 0) {  // every 64 cycles = 8ms
