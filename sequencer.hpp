@@ -16,24 +16,24 @@ class Sequencer {
   static constexpr int kTicksPerQuarterNote = 24;
   static constexpr int kTicksPerBar = kTicksPerQuarterNote * 4;
   static constexpr int kTotalClockTicks = kNumBars * kTicksPerBar;
-  static constexpr int kPatternBytes = kTotalClockTicks / 8;
+  static constexpr int kBitsPerStep = 2;
+  static constexpr int kPatternBytes = (kTotalClockTicks / 8) * kBitsPerStep;
   static constexpr int kTotalPatternBytes = kNumDrums * kPatternBytes;
 
   static constexpr uint8_t kTapHistory = 2;
 
-  uint16_t tempo_clock_count_;
+  uint32_t tempo_clock_count_;
   uint16_t tempo_interval_;
   uint8_t tap_count_;
   int8_t tap_current_;
   uint16_t tempo_clocks_[kTapHistory];
 
   uint8_t patterns_[kNumDrums][kPatternBytes];
-  uint8_t accents_[kNumDrums][kPatternBytes];
   uint32_t clock0_;
   uint32_t prev_clock_;
   uint32_t prev_boundary_;
   uint32_t last_triggers_[kNumDrums];
-  uint8_t last_accent_;
+  uint16_t last_levels_;
 
   int16_t position_;
 
@@ -68,13 +68,7 @@ class Sequencer {
   }
 
   void Initialize() {
-    for (auto idrum = 0; idrum < kNumDrums; ++idrum) {
-      for (auto ipattern = 0; ipattern < kPatternBytes; ++ipattern) {
-        auto* ptr = reinterpret_cast<uint8_t*>(E_PATTERN1) + idrum * kPatternBytes + ipattern;
-        patterns_[idrum][ipattern] = eeprom_read_byte(ptr);
-        accents_[idrum][ipattern] = eeprom_read_byte(ptr + kTotalPatternBytes);
-      }
-    }
+    eeprom_read_block(patterns_, reinterpret_cast<uint8_t*>(E_PATTERN1), kTotalPatternBytes);
     tempo_interval_ = eeprom_read_word(reinterpret_cast<uint16_t*>(E_TEMPO));
     SetBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
   }
@@ -133,25 +127,33 @@ class Sequencer {
     position_ = -1;
   }
 
-  inline void WriteTempoInterval() { data_index_ = kTotalPatternBytes * 2; }
+  inline void WriteTempoInterval() { data_index_ = kTotalPatternBytes; }
 
   void Clear() {
     for (int i = 0; i < kNumDrums; ++i) {
       last_triggers_[i] = 0;
       for (int j = 0; j < kPatternBytes; ++j) {
         patterns_[i][j] = 0;
-        accents_[i][j] = 0;
       }
     }
-    last_accent_ = 0;
+    last_levels_ = 0;
   }
 
   template <Drum drum>
-  inline void PlayPatternAt(uint8_t index, uint8_t mask) {
+  inline void PlayPatternAt(uint8_t index, uint8_t bit) {
     constexpr uint8_t drum_index = static_cast<uint8_t>(drum);
     constexpr auto trigger_func = trigger_func_[drum_index];
-    if (patterns_[drum_index][index] & mask) {
-      trigger_func((accents_[drum_index][index] & mask) ? 127 : 63);
+    uint8_t level = (patterns_[drum_index][index] >> bit) & 0x3;
+    switch (level) {
+      case 0x3:
+        trigger_func(127);
+        break;
+      case 0x2:
+        trigger_func(85);
+        break;
+      case 0x1:
+        trigger_func(50);
+        break;
     }
   }
 
@@ -171,14 +173,14 @@ class Sequencer {
     } else if (mod == 3) {
       ClearBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
     }
-    uint8_t byte = position_ >> 3;
-    uint8_t mask = _BV(7 - (position_ & 0x7));
-    PlayPatternAt<Drum::kBassDrum>(byte, mask);
-    PlayPatternAt<Drum::kSnareDrum>(byte, mask);
-    PlayPatternAt<Drum::kRimShot>(byte, mask);
-    PlayPatternAt<Drum::kHandClap>(byte, mask);
-    PlayPatternAt<Drum::kClosedHiHat>(byte, mask);
-    PlayPatternAt<Drum::kOpenHiHat>(byte, mask);
+    uint8_t byte = position_ >> 2;
+    uint8_t bit = (position_ & 0x3) << 1;
+    PlayPatternAt<Drum::kBassDrum>(byte, bit);
+    PlayPatternAt<Drum::kSnareDrum>(byte, bit);
+    PlayPatternAt<Drum::kRimShot>(byte, bit);
+    PlayPatternAt<Drum::kHandClap>(byte, bit);
+    PlayPatternAt<Drum::kClosedHiHat>(byte, bit);
+    PlayPatternAt<Drum::kOpenHiHat>(byte, bit);
 
     if (state_ == kStopping && (position_ % kTicksPerBar) == (kTicksPerBar - 1)) {
       HardStop();
@@ -197,27 +199,19 @@ class Sequencer {
         prev_boundary_ = prev_clock_ - margin;
       }
       uint32_t next_boundary = prev_clock_ + margin;
-      uint8_t byte = position_ >> 3;
-      uint8_t mask = _BV(7 - (position_ & 0x7));
+      uint8_t byte = position_ >> 2;
+      uint8_t bit = (position_ & 0x3) << 1;
       for (auto i = 0; i < kNumDrums; ++i) {
         auto last_trigger = last_triggers_[i];
         if (last_trigger >= prev_boundary_ && last_trigger < next_boundary) {
-          patterns_[i][byte] |= mask;
-          if (last_accent_ & _BV(i)) {
-            accents_[i][byte] |= mask;
-          }
+          patterns_[i][byte] |= ((last_levels_ >> (i * 2)) & 0x3) << bit;
         }
       }
       prev_boundary_ = next_boundary;
     }
 
     if (position_ == kTotalClockTicks - 1) {
-      int32_t diff = tempo_clock_count_ - clock0_;
-      if (diff < 0) {
-        diff += 0x10000;
-      }
-      tempo_interval_ = diff / 24;
-
+      tempo_interval_ = (tempo_clock_count_ - clock0_) / 24;
       EndRecording();
       return;
     } else {
@@ -244,10 +238,14 @@ class Sequencer {
     }
     if (state_ == kRecording || state_ == kStandByRecording) {
       last_triggers_[drum_index] = tempo_clock_count_;
-      if (velocity >= 96) {
-        last_accent_ |= _BV(drum_index);
+      if (velocity >= 102) {
+        last_levels_ |= 0x3 << (drum_index * 2);
+      } else if (velocity >= 76) {
+        last_levels_ |= _BV(drum_index * 2 + 1);
+        last_levels_ &= ~_BV(drum_index * 2);
       } else {
-        last_accent_ &= ~_BV(drum_index);
+        last_levels_ &= ~_BV(drum_index * 2 + 1);
+        last_levels_ |= _BV(drum_index * 2);
       }
     }
   }
@@ -287,16 +285,13 @@ class Sequencer {
     if (data_index_ < kTotalPatternBytes) {
       uint8_t* ptr = &patterns_[0][0];
       eeprom_write_async(E_PATTERN1 + data_index_, ptr[data_index_]);
-    } else if (data_index_ < kTotalPatternBytes * 2) {
-      uint8_t* ptr = &accents_[0][0];
-      eeprom_write_async(E_PATTERN1 + data_index_, ptr[data_index_ - kTotalPatternBytes]);
-    } else if (data_index_ == kTotalPatternBytes * 2) {
+    } else if (data_index_ == kTotalPatternBytes) {
       eeprom_write_async(E_TEMPO, (tempo_interval_)&0xff);
-    } else if (data_index_ == kTotalPatternBytes * 2 + 1) {
+    } else if (data_index_ == kTotalPatternBytes + 1) {
       eeprom_write_async(E_TEMPO + 1, ((tempo_interval_) >> 8) & 0xff);
     }
 
-    if (++data_index_ == kTotalPatternBytes * 2 + 2) {
+    if (++data_index_ == kTotalPatternBytes + 2) {
       data_index_ = -1;
       if (state_ == kFinishingRecording) {
         ClearBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
