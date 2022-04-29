@@ -33,7 +33,7 @@ class Sequencer {
   uint32_t prev_clock_;
   uint32_t prev_boundary_;
   uint32_t last_triggers_[kNumDrums];
-  uint8_t last_accent_;
+  uint16_t last_levels_;
 
   int16_t position_;
 
@@ -136,7 +136,7 @@ class Sequencer {
         patterns_[i][j] = 0;
       }
     }
-    last_accent_ = 0;
+    last_levels_ = 0;
   }
 
   template <Drum drum>
@@ -148,11 +148,12 @@ class Sequencer {
       case 0x3:
         trigger_func(127);
         break;
-      case 0x1:
-        trigger_func(63);
+      case 0x2:
+        trigger_func(85);
         break;
-        // default:
-        // do nothing
+      case 0x1:
+        trigger_func(50);
+        break;
     }
   }
 
@@ -203,7 +204,7 @@ class Sequencer {
       for (auto i = 0; i < kNumDrums; ++i) {
         auto last_trigger = last_triggers_[i];
         if (last_trigger >= prev_boundary_ && last_trigger < next_boundary) {
-          patterns_[i][byte] |= (last_accent_ & _BV(i)) ? (0x3 << bit) : (0x1 << bit);
+          patterns_[i][byte] |= ((last_levels_ >> (i * 2)) & 0x3) << bit;
         }
       }
       prev_boundary_ = next_boundary;
@@ -237,10 +238,14 @@ class Sequencer {
     }
     if (state_ == kRecording || state_ == kStandByRecording) {
       last_triggers_[drum_index] = tempo_clock_count_;
-      if (velocity >= 96) {
-        last_accent_ |= _BV(drum_index);
+      if (velocity >= 102) {
+        last_levels_ |= 0x3 << (drum_index * 2);
+      } else if (velocity >= 76) {
+        last_levels_ |= _BV(drum_index * 2 + 1);
+        last_levels_ &= ~_BV(drum_index * 2);
       } else {
-        last_accent_ &= ~_BV(drum_index);
+        last_levels_ &= ~_BV(drum_index * 2 + 1);
+        last_levels_ |= _BV(drum_index * 2);
       }
     }
   }
