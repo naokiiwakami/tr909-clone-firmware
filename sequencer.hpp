@@ -26,8 +26,7 @@ class Sequencer {
   uint16_t tempo_interval_;
   uint8_t tap_count_;
   int8_t tap_current_;
-  uint16_t tempo_clocks_[kTapHistory];
-
+  uint32_t tempo_clocks_[kTapHistory];
   uint8_t patterns_[kNumDrums][kPatternBytes];
   uint32_t clock0_;
   uint32_t prev_clock_;
@@ -256,12 +255,9 @@ class Sequencer {
       tap_current_ = kTapHistory - 1;
       SetBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
     } else {
-      int32_t diff =
-          tempo_clock_count_ - tempo_clocks_[(tap_current_ + (tap_count_ - 1)) % kTapHistory];
-      if (diff < 0) {
-        diff += 0x10000;
-      }
-      diff /= tap_count_ * 24;
+      uint32_t diff = Subtract<uint32_t>(
+          tempo_clock_count_, tempo_clocks_[(tap_current_ + (tap_count_ - 1)) % kTapHistory]);
+      diff /= 24 * tap_count_;
       tempo_interval_ = diff;
 
       if (--tap_current_ < 0) {
