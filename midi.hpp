@@ -55,17 +55,13 @@ class MidiReceiver {
     if (next_byte >= 0xf0) {
       switch (next_byte) {
         case MIDI_REALTIME_START:
-          if (g_sequencer.GetState() == Sequencer::kStandByRecording) {
-            g_sequencer.StartRecording();
-          }
+          g_sequencer.StartRecording();
           break;
         case MIDI_REALTIME_CLOCK:
           g_sequencer.StepForwardRecording();
           break;
         case MIDI_REALTIME_STOP:
-          if (g_sequencer.GetState() == Sequencer::kRecording) {
-            g_sequencer.EndRecording();
-          }
+          g_sequencer.EndRecording();
           break;
       }
       return;

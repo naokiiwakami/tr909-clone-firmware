@@ -5,6 +5,7 @@
 #ifndef SEQUENCER_HPP_
 #define SEQUENCER_HPP_
 
+#include "din_sync.hpp"
 #include "eeprom.hpp"
 #include "instruments.hpp"
 #include "utils.hpp"
@@ -92,14 +93,14 @@ class Sequencer {
   inline void IncrementClock() { ++tempo_clock_count_; }
 
   inline void Start() {
-    ClearBit(PORT_DIN_START, BIT_DIN_START);
+    g_din_sync.Start();
     state_ = kRunning;
   }
 
   inline void Stop() { state_ = kStopping; }
 
   inline void HardStop() {
-    SetBit(PORT_DIN_START, BIT_DIN_START);
+    g_din_sync.Stop();
     state_ = kStandBy;
   }
 
@@ -116,23 +117,31 @@ class Sequencer {
     state_ = kStandByRecording;
     tempo_clock_count_ = 0;
     prev_boundary_ = 0;
-    SetBit(PORT_DIN_START, BIT_DIN_START);
+    g_din_sync.Start();
     Clear();
   }
 
   inline void StartRecording() {
-    state_ = kRecording;
-    prev_clock_ = tempo_clock_count_;
-    tap_count_ = 0;
-    clock0_ = prev_clock_;
-    ClearBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
+    if (state_ == kStandByRecording) {
+      state_ = kRecording;
+      prev_clock_ = tempo_clock_count_;
+      tap_count_ = 0;
+      clock0_ = prev_clock_;
+      ClearBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
+    } else {
+      g_din_sync.Start();
+    }
   }
 
   inline void EndRecording() {
-    state_ = kFinishingRecording;
-    position_ = -1;
-    StartWritingTempo();
-    StartWritingPattern();
+    if (state_ == Sequencer::kRecording) {
+      state_ = kFinishingRecording;
+      position_ = -1;
+      StartWritingTempo();
+      StartWritingPattern();
+    } else {
+      g_din_sync.Stop();
+    }
   }
 
   inline void StartWritingTempo() { eeprom_write_enabled_ |= kMaskTempoL | kMaskTempoH; }
@@ -202,6 +211,9 @@ class Sequencer {
 
   void StepForwardRecording() {
     if (state_ != kRecording) {
+      if (state_ == kStandBy) {
+        // g_din_sync.Clock();
+      }
       return;
     }
     if (position_ >= 0) {

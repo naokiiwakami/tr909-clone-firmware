@@ -6,6 +6,7 @@
 #include <avr/io.h>
 
 #include "adc.hpp"
+#include "din_sync.hpp"
 #include "eeprom.hpp"
 #include "hi_hat_wav.hpp"
 #include "instruments.hpp"
@@ -318,6 +319,7 @@ void SetUp() {
 static constexpr uint16_t TRIGGER_SHUTDOWN_AT = (255 - 16);  // 2.048 ms
 static constexpr uint8_t kTapHistory = 2;
 
+DinSync g_din_sync;
 Sequencer g_sequencer{};
 
 inline void Tap() { g_sequencer.Tap(); }
@@ -434,13 +436,12 @@ int main(void) {
     if (current_timer_value < prev_timer_value) {
       ++divider;
       CheckInstruments();
+      g_din_sync.Update();
       if (++tempo_counter >= g_sequencer.GetTempoInterval()) {
-        ClearBit(PORT_DIN_CLOCK, BIT_DIN_CLOCK);
+        g_din_sync.Clock();
         g_sequencer.StepForward();
         tempo_counter = 0;
-      } else if (tempo_counter >= (g_sequencer.GetTempoInterval() >> 1)) {
-        SetBit(PORT_DIN_CLOCK, BIT_DIN_CLOCK);
-      }
+      }      
       g_sequencer.IncrementClock();
       if ((divider & 0x3f) == 0) {  // every 64 cycles = 8ms
         uint8_t current_switches = PORT_SWITCHES;
