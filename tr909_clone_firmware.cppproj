@@ -157,6 +157,9 @@
     <Compile Include="adc.hpp">
       <SubType>compile</SubType>
     </Compile>
+    <Compile Include="din_sync.hpp">
+      <SubType>compile</SubType>
+    </Compile>
     <Compile Include="eeprom.hpp">
       <SubType>compile</SubType>
     </Compile>

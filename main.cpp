@@ -422,7 +422,6 @@ int main(void) {
   uint8_t noise_clock = 0;
   uint32_t noise_register = ~0;
   uint16_t divider = 0;
-  uint16_t tempo_counter = 0;
   while (1) {
     // Check MIDI input
     while (UCSR1A & _BV(RXC1)) {
@@ -434,13 +433,6 @@ int main(void) {
     if (current_timer_value < prev_timer_value) {
       ++divider;
       CheckInstruments();
-      if (++tempo_counter >= g_sequencer.GetTempoInterval()) {
-        ClearBit(PORT_DIN_CLOCK, BIT_DIN_CLOCK);
-        g_sequencer.StepForward();
-        tempo_counter = 0;
-      } else if (tempo_counter >= (g_sequencer.GetTempoInterval() >> 1)) {
-        SetBit(PORT_DIN_CLOCK, BIT_DIN_CLOCK);
-      }
       g_sequencer.IncrementClock();
       if ((divider & 0x3f) == 0) {  // every 64 cycles = 8ms
         uint8_t current_switches = PORT_SWITCHES;
