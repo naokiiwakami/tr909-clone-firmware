@@ -23,10 +23,13 @@ class Sequencer {
 
   static constexpr uint8_t kTapHistory = 2;
 
-  uint32_t tempo_clock_count_;
+  uint16_t tempo_interval_counter_ = 0;
   uint16_t tempo_interval_;
-  uint8_t tap_count_;
-  int8_t tap_current_;
+
+  uint8_t tap_count_ = 0;
+  int8_t tap_current_ = 0;
+
+  uint32_t tempo_clock_count_ = 0;
   uint32_t tempo_clocks_[kTapHistory];
   uint8_t patterns_[kNumDrums][kPatternBytes];
   uint32_t clock0_;
@@ -35,19 +38,19 @@ class Sequencer {
   uint32_t last_triggers_[kNumDrums];
   uint16_t last_levels_;
 
-  int16_t position_;
+  int16_t position_ = -1;
 
-  uint8_t state_;
+  uint8_t state_ = kStandBy;
 
   // eeprom control
-  uint8_t eeprom_write_enabled_;
   // masks for eeprom_write_enabled_ bits
   static constexpr uint8_t kMaskMidiCh = 0x1;
   static constexpr uint8_t kMaskTempoL = 0x2;
   static constexpr uint8_t kMaskTempoH = 0x4;
   static constexpr uint8_t kMaskPattern1 = 0x8;
 
-  int16_t data_index_;
+  uint8_t eeprom_write_enabled_ = 0;
+  int16_t data_index_ = 0;
 
   static constexpr void (*trigger_func_[])(int8_t) = {
       TriggerBassDrum, TriggerSnareDrum,   TriggerRimShot,
@@ -64,16 +67,7 @@ class Sequencer {
 
   inline uint8_t DrumIndex(Drum drum) { return static_cast<uint8_t>(drum); }
 
-  Sequencer()
-      : tempo_clock_count_{0},
-        tap_count_{0},
-        tap_current_{0},
-        position_{-1},
-        state_{kStandBy},
-        eeprom_write_enabled_{0},
-        data_index_{0} {
-    Clear();
-  }
+  Sequencer() { Clear(); }
 
   void Initialize() {
     eeprom_read_block(patterns_, reinterpret_cast<uint8_t*>(E_PATTERN1), kTotalPatternBytes);
@@ -90,7 +84,15 @@ class Sequencer {
 
   inline uint16_t GetTempoInterval() const { return tempo_interval_; }
 
-  inline void IncrementClock() { ++tempo_clock_count_; }
+  inline void IncrementClock() {
+    g_din_sync.Update();
+    if (++tempo_interval_counter_ >= tempo_interval_) {
+      StepForward();
+      tempo_interval_counter_ = 0;
+    }
+
+    ++tempo_clock_count_;
+  }
 
   inline void Start() {
     g_din_sync.Start();
@@ -186,6 +188,7 @@ class Sequencer {
     if ((state_ & (kRunning | kStopping)) == 0) {
       return;
     }
+    g_din_sync.Clock();
     if (++position_ == kTotalClockTicks) {
       position_ = 0;
     }
@@ -212,7 +215,7 @@ class Sequencer {
   void StepForwardRecording() {
     if (state_ != kRecording) {
       if (state_ == kStandBy) {
-        // g_din_sync.Clock();
+        g_din_sync.Clock();
       }
       return;
     }
