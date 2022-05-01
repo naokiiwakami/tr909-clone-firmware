@@ -359,7 +359,7 @@ void CheckSwitches(uint8_t prev_switches, uint8_t new_switches) {
   }
   if (g_sequencer.GetTapCount() > 0) {
     g_sequencer.ResetTapCount();
-    g_sequencer.WriteTempoInterval();
+    g_sequencer.StartWritingTempo();
   }
   CheckDrumSwitch<Drum::kBassDrum>(prev_switches, new_switches, BIT_SW_BASS_DRUM);
   CheckDrumSwitch<Drum::kSnareDrum>(prev_switches, new_switches, BIT_SW_SNARE_DRUM);

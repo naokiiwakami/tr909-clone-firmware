@@ -38,7 +38,14 @@ class Sequencer {
 
   uint8_t state_;
 
-  // [-3] - inactive, [-2:0] - write the tempo, [0:] - write the pattern and the accents
+  // eeprom control
+  uint8_t eeprom_write_enabled_;
+  // masks for eeprom_write_enabled_ bits
+  static constexpr uint8_t kMaskMidiCh = 0x1;
+  static constexpr uint8_t kMaskTempoL = 0x2;
+  static constexpr uint8_t kMaskTempoH = 0x4;
+  static constexpr uint8_t kMaskPattern1 = 0x8;
+
   int16_t data_index_;
 
   static constexpr void (*trigger_func_[])(int8_t) = {
@@ -62,7 +69,8 @@ class Sequencer {
         tap_current_{0},
         position_{-1},
         state_{kStandBy},
-        data_index_{-1} {
+        eeprom_write_enabled_{0},
+        data_index_{0} {
     Clear();
   }
 
@@ -122,11 +130,17 @@ class Sequencer {
 
   inline void EndRecording() {
     state_ = kFinishingRecording;
-    data_index_ = 0;
     position_ = -1;
+    StartWritingTempo();
+    StartWritingPattern();
   }
 
-  inline void WriteTempoInterval() { data_index_ = kTotalPatternBytes; }
+  inline void StartWritingTempo() { eeprom_write_enabled_ |= kMaskTempoL | kMaskTempoH; }
+
+  inline void StartWritingPattern() {
+    eeprom_write_enabled_ |= kMaskPattern1;
+    data_index_ = 0;
+  }
 
   void Clear() {
     for (int i = 0; i < kNumDrums; ++i) {
@@ -271,24 +285,31 @@ class Sequencer {
   }
 
   void Poll() {
-    if (data_index_ < 0 || !eeprom_is_ready()) {
+    if (eeprom_write_enabled_ == 0 || !eeprom_is_ready()) {
       return;
     }
 
-    if ((data_index_ & 4) == 0) {
-      ToggleBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
-    }
-    if (data_index_ < kTotalPatternBytes) {
-      uint8_t* ptr = &patterns_[0][0];
-      eeprom_write_async(E_PATTERN1 + data_index_, ptr[data_index_]);
-    } else if (data_index_ == kTotalPatternBytes) {
+    if (eeprom_write_enabled_ & kMaskTempoL) {
       eeprom_write_async(E_TEMPO, (tempo_interval_)&0xff);
-    } else if (data_index_ == kTotalPatternBytes + 1) {
+      eeprom_write_enabled_ &= ~kMaskTempoL;
+      return;
+    }
+    if (eeprom_write_enabled_ & kMaskTempoH) {
       eeprom_write_async(E_TEMPO + 1, ((tempo_interval_) >> 8) & 0xff);
+      eeprom_write_enabled_ &= ~kMaskTempoH;
+      return;
     }
 
-    if (++data_index_ == kTotalPatternBytes + 2) {
-      data_index_ = -1;
+    if ((data_index_ & 8) == 0) {
+      ToggleBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
+    }
+
+    uint8_t* ptr = &patterns_[0][0];
+    eeprom_write_async(E_PATTERN1 + data_index_, ptr[data_index_]);
+
+    if (++data_index_ == kTotalPatternBytes) {
+      data_index_ = 0;
+      eeprom_write_enabled_ &= ~kMaskPattern1;
       if (state_ == kFinishingRecording) {
         ClearBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
         state_ = kStandBy;
