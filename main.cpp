@@ -6,7 +6,6 @@
 #include <avr/io.h>
 
 #include "adc.hpp"
-#include "din_sync.hpp"
 #include "eeprom.hpp"
 #include "hi_hat_wav.hpp"
 #include "instruments.hpp"
@@ -319,7 +318,6 @@ void SetUp() {
 static constexpr uint16_t TRIGGER_SHUTDOWN_AT = (255 - 16);  // 2.048 ms
 static constexpr uint8_t kTapHistory = 2;
 
-DinSync g_din_sync;
 Sequencer g_sequencer{};
 
 inline void Tap() { g_sequencer.Tap(); }

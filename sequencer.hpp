@@ -14,32 +14,38 @@ class Sequencer {
  private:
   static constexpr int kNumDrums = static_cast<int>(Drum::kOutOfRange);
   static constexpr int kNumBars = 4;
-  static constexpr int kTicksPerQuarterNote = 24;
-  static constexpr int kTicksPerBar = kTicksPerQuarterNote * 4;
-  static constexpr int kTotalClockTicks = kNumBars * kTicksPerBar;
+  static constexpr int kClocksPerQuarterNote = 24;
+  static constexpr int kClocksPerBar = kClocksPerQuarterNote * 4;
+  static constexpr int kTotalClocks = kNumBars * kClocksPerBar;
   static constexpr int kBitsPerStep = 2;
-  static constexpr int kPatternBytes = (kTotalClockTicks / 8) * kBitsPerStep;
+  static constexpr int kPatternBytes = (kTotalClocks / 8) * kBitsPerStep;
   static constexpr int kTotalPatternBytes = kNumDrums * kPatternBytes;
 
   static constexpr uint8_t kTapHistory = 2;
 
-  uint16_t tempo_interval_counter_ = 0;
-  uint16_t tempo_interval_;
+  uint32_t master_tempo_ticks_ = 0;
 
+  // tap tempo
   uint8_t tap_count_ = 0;
   int8_t tap_current_ = 0;
+  uint32_t ticks_history_[kTapHistory];
 
-  uint32_t tempo_clock_count_ = 0;
-  uint32_t tempo_clocks_[kTapHistory];
-  uint8_t patterns_[kNumDrums][kPatternBytes];
-  uint32_t clock0_;
-  uint32_t prev_clock_;
+  // pattern recording
+  uint32_t ticks_last_quarter_note_;
+  uint32_t ticks_last_clock_;
   uint32_t prev_boundary_;
+
   uint32_t last_triggers_[kNumDrums];
   uint16_t last_levels_;
 
+  // playing the pattern
+  uint8_t patterns_[kNumDrums][kPatternBytes];
   int16_t position_ = -1;
 
+  uint16_t tempo_interval_count_ = 0;
+  uint16_t tempo_interval_;
+
+  // sequencer state
   uint8_t state_ = kStandBy;
 
   // eeprom control
@@ -51,6 +57,8 @@ class Sequencer {
 
   uint8_t eeprom_write_enabled_ = 0;
   int16_t data_index_ = 0;
+
+  DinSync din_sync_;
 
   static constexpr void (*trigger_func_[])(int8_t) = {
       TriggerBassDrum, TriggerSnareDrum,   TriggerRimShot,
@@ -85,24 +93,24 @@ class Sequencer {
   inline uint16_t GetTempoInterval() const { return tempo_interval_; }
 
   inline void IncrementClock() {
-    g_din_sync.Update();
-    if (++tempo_interval_counter_ >= tempo_interval_) {
+    din_sync_.Update();
+    if (++tempo_interval_count_ >= tempo_interval_) {
       StepForward();
-      tempo_interval_counter_ = 0;
+      tempo_interval_count_ = 0;
     }
 
-    ++tempo_clock_count_;
+    ++master_tempo_ticks_;
   }
 
   inline void Start() {
-    g_din_sync.Start();
+    din_sync_.Start();
     state_ = kRunning;
   }
 
   inline void Stop() { state_ = kStopping; }
 
   inline void HardStop() {
-    g_din_sync.Stop();
+    din_sync_.Stop();
     state_ = kStandBy;
   }
 
@@ -117,21 +125,21 @@ class Sequencer {
   inline void StandByRecording() {
     position_ = -1;
     state_ = kStandByRecording;
-    tempo_clock_count_ = 0;
+    master_tempo_ticks_ = 0;
     prev_boundary_ = 0;
-    g_din_sync.Start();
+    din_sync_.Start();
     Clear();
   }
 
   inline void StartRecording() {
     if (state_ == kStandByRecording) {
       state_ = kRecording;
-      prev_clock_ = tempo_clock_count_;
+      ticks_last_clock_ = master_tempo_ticks_;
       tap_count_ = 0;
-      clock0_ = prev_clock_;
+      ticks_last_quarter_note_ = ticks_last_clock_;
       ClearBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
     } else {
-      g_din_sync.Start();
+      din_sync_.Start();
     }
   }
 
@@ -142,7 +150,7 @@ class Sequencer {
       StartWritingTempo();
       StartWritingPattern();
     } else {
-      g_din_sync.Stop();
+      din_sync_.Stop();
     }
   }
 
@@ -188,8 +196,8 @@ class Sequencer {
     if ((state_ & (kRunning | kStopping)) == 0) {
       return;
     }
-    g_din_sync.Clock();
-    if (++position_ == kTotalClockTicks) {
+    din_sync_.Clock();
+    if (++position_ == kTotalClocks) {
       position_ = 0;
     }
     auto mod = position_ % 24;
@@ -207,7 +215,7 @@ class Sequencer {
     PlayPatternAt<Drum::kClosedHiHat>(byte, bit);
     PlayPatternAt<Drum::kOpenHiHat>(byte, bit);
 
-    if (state_ == kStopping && (position_ % kTicksPerBar) == (kTicksPerBar - 1)) {
+    if (state_ == kStopping && (position_ % kClocksPerBar) == (kClocksPerBar - 1)) {
       HardStop();
     }
   }
@@ -215,18 +223,18 @@ class Sequencer {
   void StepForwardRecording() {
     if (state_ != kRecording) {
       if (state_ == kStandBy) {
-        g_din_sync.Clock();
+        din_sync_.Clock();
       }
       return;
     }
     if (position_ >= 0) {
       // quantize
-      tempo_interval_ = (tempo_clock_count_ - prev_clock_) >> 1;
-      auto margin = tempo_interval_;
+      tempo_interval_ = master_tempo_ticks_ - ticks_last_clock_;
+      auto margin = tempo_interval_ >> 1;
       if (prev_boundary_ == 0) {
-        prev_boundary_ = prev_clock_ - margin;
+        prev_boundary_ = ticks_last_clock_ - margin;
       }
-      uint32_t next_boundary = prev_clock_ + margin;
+      uint32_t next_boundary = ticks_last_clock_ + margin;
       uint8_t byte = position_ >> 2;
       uint8_t bit = (position_ & 0x3) << 1;
       for (auto i = 0; i < kNumDrums; ++i) {
@@ -238,19 +246,19 @@ class Sequencer {
       prev_boundary_ = next_boundary;
     }
 
-    if (position_ == kTotalClockTicks - 1) {
-      tempo_interval_ = (tempo_clock_count_ - clock0_) / 24;
+    if (position_ == kTotalClocks - 1) {
+      tempo_interval_ = (master_tempo_ticks_ - ticks_last_quarter_note_) / 24;
       EndRecording();
       return;
     } else {
       ++position_;
     }
-    prev_clock_ = tempo_clock_count_;
+    ticks_last_clock_ = master_tempo_ticks_;
 
     // blink the tempo indicator
-    auto mod = position_ % kTicksPerQuarterNote;
+    auto mod = position_ % kClocksPerQuarterNote;
     if (mod == 0) {
-      clock0_ = tempo_clock_count_;
+      ticks_last_quarter_note_ = master_tempo_ticks_;
       SetBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
     } else if (mod == 3) {
       ClearBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
@@ -265,7 +273,7 @@ class Sequencer {
       trigger_func(velocity);
     }
     if (state_ == kRecording || state_ == kStandByRecording) {
-      last_triggers_[drum_index] = tempo_clock_count_;
+      last_triggers_[drum_index] = master_tempo_ticks_;
       if (velocity >= 102) {
         last_levels_ |= 0x3 << (drum_index * 2);
       } else if (velocity >= 76) {
@@ -280,12 +288,12 @@ class Sequencer {
 
   inline void Tap() {
     if (tap_count_ == 0) {
-      tempo_clock_count_ = 0;
+      master_tempo_ticks_ = 0;
       tap_current_ = kTapHistory - 1;
       SetBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
     } else {
       uint32_t diff = Subtract<uint32_t>(
-          tempo_clock_count_, tempo_clocks_[(tap_current_ + (tap_count_ - 1)) % kTapHistory]);
+          master_tempo_ticks_, ticks_history_[(tap_current_ + (tap_count_ - 1)) % kTapHistory]);
       diff /= 24 * tap_count_;
       tempo_interval_ = diff;
 
@@ -293,7 +301,7 @@ class Sequencer {
         tap_current_ = kTapHistory - 1;
       }
     }
-    tempo_clocks_[tap_current_] = tempo_clock_count_;
+    ticks_history_[tap_current_] = master_tempo_ticks_;
     if (tap_count_ < kTapHistory) {
       ++tap_count_;
     }
