@@ -1,7 +1,6 @@
 /*
  * sequencer.hpp
  */
-
 #ifndef SEQUENCER_HPP_
 #define SEQUENCER_HPP_
 
@@ -11,7 +10,7 @@
 #include "utils.hpp"
 
 class Sequencer {
- private:
+ public:
   static constexpr int kNumDrums = static_cast<int>(Drum::kOutOfRange);
   static constexpr int kNumBars = 4;
   static constexpr int kClocksPerQuarterNote = 24;
@@ -21,6 +20,7 @@ class Sequencer {
   static constexpr int kPatternBytes = (kTotalClocks / 8) * kBitsPerStep;
   static constexpr int kTotalPatternBytes = kNumDrums * kPatternBytes;
 
+ private:
   static constexpr uint8_t kTapHistory = 2;
 
   uint32_t master_tempo_ticks_ = 0;
@@ -41,6 +41,7 @@ class Sequencer {
   // playing the pattern
   uint8_t patterns_[kNumDrums][kPatternBytes];
   int16_t position_ = -1;
+  uint8_t pattern_id_;
 
   uint16_t tempo_interval_count_ = 0;
   uint16_t tempo_interval_;
@@ -51,9 +52,8 @@ class Sequencer {
   // eeprom control
   // masks for eeprom_write_enabled_ bits
   static constexpr uint8_t kMaskMidiCh = 0x1;
-  static constexpr uint8_t kMaskTempoL = 0x2;
-  static constexpr uint8_t kMaskTempoH = 0x4;
-  static constexpr uint8_t kMaskPattern1 = 0x8;
+  static constexpr uint8_t kMaskTempo = 0x2;
+  static constexpr uint8_t kMaskPattern1 = 0x4;
 
   uint8_t eeprom_write_enabled_ = 0;
   int16_t data_index_ = 0;
@@ -78,9 +78,18 @@ class Sequencer {
   Sequencer() { Clear(); }
 
   void Initialize() {
-    eeprom_read_block(patterns_, reinterpret_cast<uint8_t*>(E_PATTERN1), kTotalPatternBytes);
+    pattern_id_ = eeprom_read_byte(E_PATTERN_ID);
+    LoadPattern();
     tempo_interval_ = eeprom_read_word(reinterpret_cast<uint16_t*>(E_TEMPO));
     SetBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
+  }
+
+  void LoadPattern() {
+    MapToLed(0x20 >> pattern_id_);
+    eeprom_read_block(patterns_,
+                      reinterpret_cast<uint8_t*>(E_PATTERN) + kTotalPatternBytes * pattern_id_,
+                      kTotalPatternBytes);
+    MapToLed(0);
   }
 
   inline uint8_t GetState() const { return state_; }
@@ -91,6 +100,12 @@ class Sequencer {
   inline void ResetTapCount() { tap_count_ = 0; }
 
   inline uint16_t GetTempoInterval() const { return tempo_interval_; }
+
+  inline uint8_t GetPatternId() const { return pattern_id_; }
+  inline void SetPatternId(uint8_t pattern_id) {
+    pattern_id_ = pattern_id;
+    eeprom_update_byte(E_PATTERN_ID, pattern_id);
+  }
 
   inline void IncrementClock() {
     din_sync_.Update();
@@ -112,6 +127,7 @@ class Sequencer {
   inline void HardStop() {
     din_sync_.Stop();
     state_ = kStandBy;
+    MapToLed(0);
   }
 
   inline void Toggle() {
@@ -129,6 +145,7 @@ class Sequencer {
     prev_boundary_ = 0;
     din_sync_.Start();
     Clear();
+    MapToLed(0x20 >> pattern_id_);
   }
 
   inline void StartRecording() {
@@ -137,6 +154,9 @@ class Sequencer {
       ticks_last_clock_ = master_tempo_ticks_;
       tap_count_ = 0;
       ticks_last_quarter_note_ = ticks_last_clock_;
+      ClearBit(PORT_LED_BASS_DRUM, BIT_LED_BASS_DRUM);
+      ClearBit(PORT_LED_SNARE_DRUM, BIT_LED_SNARE_DRUM);
+      ClearBit(PORT_LED_RIM_SHOT, BIT_LED_RIM_SHOT);
       ClearBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
     } else {
       din_sync_.Start();
@@ -154,7 +174,7 @@ class Sequencer {
     }
   }
 
-  inline void StartWritingTempo() { eeprom_write_enabled_ |= kMaskTempoL | kMaskTempoH; }
+  inline void StartWritingTempo() { eeprom_write_enabled_ |= kMaskTempo; }
 
   inline void StartWritingPattern() {
     eeprom_write_enabled_ |= kMaskPattern1;
@@ -312,14 +332,9 @@ class Sequencer {
       return;
     }
 
-    if (eeprom_write_enabled_ & kMaskTempoL) {
-      eeprom_write_async(E_TEMPO, (tempo_interval_)&0xff);
-      eeprom_write_enabled_ &= ~kMaskTempoL;
-      return;
-    }
-    if (eeprom_write_enabled_ & kMaskTempoH) {
-      eeprom_write_async(E_TEMPO + 1, ((tempo_interval_) >> 8) & 0xff);
-      eeprom_write_enabled_ &= ~kMaskTempoH;
+    if (eeprom_write_enabled_ & kMaskTempo) {
+      eeprom_write_word(reinterpret_cast<uint16_t*>(E_TEMPO), tempo_interval_);
+      eeprom_write_enabled_ &= ~kMaskTempo;
       return;
     }
 
@@ -328,7 +343,8 @@ class Sequencer {
     }
 
     uint8_t* ptr = &patterns_[0][0];
-    eeprom_write_async(E_PATTERN1 + data_index_, ptr[data_index_]);
+    eeprom_write_async(E_PATTERN + kTotalPatternBytes * pattern_id_ + data_index_,
+                       ptr[data_index_]);
 
     if (++data_index_ == kTotalPatternBytes) {
       data_index_ = 0;

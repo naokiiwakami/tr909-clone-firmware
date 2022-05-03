@@ -27,8 +27,12 @@ hi_hat_t g_hi_hat;
 void InitializeEEPROM() {
   if (eeprom_read_byte(E_MAGIC) != 0xa2) {
     eeprom_write_byte(E_MIDI_CH, 0);
-    eeprom_write_byte(E_MAGIC, 0xa2);
     eeprom_write_word(reinterpret_cast<uint16_t*>(E_TEMPO), 150);
+    eeprom_write_byte(E_PATTERN_ID, 0);
+    for (int i = 0; i < Sequencer::kTotalPatternBytes * 3; ++i) {
+      eeprom_write_byte(reinterpret_cast<uint8_t*>(E_PATTERN) + i, 0);
+    }
+    eeprom_write_byte(E_MAGIC, 0xa2);
   }
 }
 
@@ -188,19 +192,6 @@ Adc g_adc{};
 
 MidiReceiver g_midi_receiver{};
 
-/**
- * Turn on/off LEDs as reflections of bits in the value.
- */
-inline void MapToLed(uint8_t value) {
-  SetBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE, (value & 0x40) != 0);
-  SetBit(PORT_LED_BASS_DRUM, BIT_LED_BASS_DRUM, (value & 0x20) != 0);
-  SetBit(PORT_LED_SNARE_DRUM, BIT_LED_SNARE_DRUM, (value & 0x10) != 0);
-  SetBit(PORT_LED_RIM_SHOT, BIT_LED_RIM_SHOT, (value & 0x8) != 0);
-  SetBit(PORT_LED_HAND_CLAP, BIT_LED_HAND_CLAP, (value & 0x4) != 0);
-  SetBit(PORT_LED_CLOSED_HI_HAT, BIT_LED_CLOSED_HI_HAT, (value & 0x2) != 0);
-  SetBit(PORT_LED_OPEN_HI_HAT, BIT_LED_OPEN_HI_HAT, (value & 0x1) != 0);
-}
-
 bool CheckSwitchesMidi(uint8_t prev_switches, uint8_t new_switches, uint8_t* midi_indicator) {
   if ((prev_switches & _BV(BIT_SW_SNARE_DRUM)) && !(new_switches & _BV(BIT_SW_SNARE_DRUM))) {
     if (*midi_indicator < 16) {
@@ -263,6 +254,44 @@ void SetUpMidi() {
     prev_timer_value = current_timer_value;
   }
   MapToLed(0);
+}
+
+volatile uint8_t g_prev_switches;
+
+void ChangePattern() {
+  uint8_t prev_timer_value = 0;
+  uint16_t divider = 0;
+  uint8_t pattern_id = g_sequencer.GetPatternId();
+  MapToLed(0x20 >> pattern_id);
+  while (true) {
+    uint8_t current_timer_value = TCNT0;
+    if (current_timer_value < prev_timer_value) {
+      ++divider;
+      if ((divider & 0xff) == 0) {  // every 256 cycles = 32ms
+        if ((divider & 0x1ff) == 0) {
+          ToggleBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
+        }
+        uint8_t current_switches = PORT_SWITCHES;
+        if (current_switches != g_prev_switches) {
+          g_prev_switches = current_switches;
+          if (!(current_switches & _BV(BIT_SW_BASS_DRUM))) {
+            pattern_id = 0;
+          } else if (!(current_switches & _BV(BIT_SW_SNARE_DRUM))) {
+            pattern_id = 1;
+          } else if (!(current_switches & _BV(BIT_SW_RIM_SHOT))) {
+            pattern_id = 2;
+          } else if (!(current_switches & _BV(BIT_SW_DIN_MUTE))) {
+            MapToLed(0);
+            g_sequencer.SetPatternId(pattern_id);
+            g_sequencer.LoadPattern();
+            return;
+          }
+          MapToLed(0x20 >> pattern_id);
+        }
+      }
+    }
+    prev_timer_value = current_timer_value;
+  }
 }
 
 void StartupSequence() {
@@ -329,14 +358,8 @@ inline void ToggleSequencer() { g_sequencer.Toggle(); }
 inline void OnShift() {
   if (g_sequencer.GetState() & (Sequencer::kStandByRecording | Sequencer::kRecording)) {
     g_sequencer.HardStop();
+    g_sequencer.LoadPattern();
     ClearBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
-  }
-}
-
-template <void (*Func)()>
-void CheckSwitch(uint8_t prev_switches, uint8_t new_switches, uint8_t switch_bit) {
-  if ((prev_switches & _BV(switch_bit)) && !(new_switches & _BV(switch_bit))) {
-    Func();
   }
 }
 
@@ -352,9 +375,14 @@ void CheckSwitches(uint8_t prev_switches, uint8_t new_switches) {
     return;
   }
   if ((new_switches & _BV(BIT_SW_SHIFT)) == 0) {
-    CheckSwitch<OnShift>(prev_switches, new_switches, BIT_SW_SHIFT);
-    CheckSwitch<Tap>(prev_switches, new_switches, BIT_SW_BASS_DRUM);
-    CheckSwitch<SequencerStandByRecording>(prev_switches, new_switches, BIT_SW_DIN_MUTE);
+    if (!(new_switches & _BV(BIT_SW_OPEN_HI_HAT))) {
+      ChangePattern();
+    } else {
+      CheckSwitch<OnShift>(prev_switches, new_switches, BIT_SW_SHIFT);
+      CheckSwitch<Tap>(prev_switches, new_switches, BIT_SW_BASS_DRUM);
+      CheckSwitch<SequencerStandByRecording>(prev_switches, new_switches, BIT_SW_DIN_MUTE);
+      g_prev_switches = new_switches;
+    }
     return;
   }
   if (g_sequencer.GetTapCount() > 0) {
@@ -368,6 +396,7 @@ void CheckSwitches(uint8_t prev_switches, uint8_t new_switches) {
   CheckDrumSwitch<Drum::kOpenHiHat>(prev_switches, new_switches, BIT_SW_OPEN_HI_HAT);
   CheckDrumSwitch<Drum::kClosedHiHat>(prev_switches, new_switches, BIT_SW_CLOSED_HI_HAT);
   CheckSwitch<ToggleSequencer>(prev_switches, new_switches, BIT_SW_DIN_MUTE);
+  g_prev_switches = new_switches;
 }
 
 template <typename InstrumentT>
@@ -418,7 +447,6 @@ int main(void) {
   }
 
   uint8_t prev_timer_value = 0;
-  uint8_t prev_switches = PORT_SWITCHES;
   uint8_t noise_clock = 0;
   uint32_t noise_register = ~0;
   uint16_t divider = 0;
@@ -436,8 +464,7 @@ int main(void) {
       g_sequencer.IncrementClock();
       if ((divider & 0x3f) == 0) {  // every 64 cycles = 8ms
         uint8_t current_switches = PORT_SWITCHES;
-        CheckSwitches(prev_switches, current_switches);
-        prev_switches = current_switches;
+        CheckSwitches(g_prev_switches, current_switches);
         g_sequencer.Poll();
 
         if ((divider & 0x7f) == 0) {  // every 128 cycles = 16ms
