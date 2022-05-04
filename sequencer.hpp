@@ -327,7 +327,7 @@ class Sequencer {
     }
   }
 
-  void Poll() {
+  inline void Poll() {
     if (eeprom_write_enabled_ == 0 || !eeprom_is_ready()) {
       return;
     }
@@ -338,7 +338,7 @@ class Sequencer {
       return;
     }
 
-    if ((data_index_ & 8) == 0) {
+    if ((data_index_ & 0xf) == 0) {
       ToggleBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
     }
 
