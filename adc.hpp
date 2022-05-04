@@ -3,14 +3,13 @@
  *
  * ADC controller
  */
+#ifndef ADC_HPP_
+#define ADC_HPP_
 
 #include <avr/io.h>
 
 #include "instruments.hpp"
 #include "ports.hpp"
-
-#ifndef ADC_HPP_
-#define ADC_HPP_
 
 class Adc {
  private:

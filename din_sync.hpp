@@ -1,12 +1,11 @@
 /*
  * din_sync.h
  */
+#ifndef DIN_SYNC_HPP_
+#define DIN_SYNC_HPP_
 
 #include "ports.hpp"
 #include "utils.hpp"
-
-#ifndef DIN_SYNC_HPP_
-#define DIN_SYNC_HPP_
 
 class DinSync {
  private:

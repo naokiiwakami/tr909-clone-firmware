@@ -1,14 +1,14 @@
 /*
  * midi_message.h
  */
+#ifndef MIDI_MESSAGE_HPP_
+#define MIDI_MESSAGE_HPP_
+
 #include <avr/io.h>
 
 #include "eeprom.hpp"
 #include "sequencer.hpp"
 #include "system.hpp"
-
-#ifndef MIDI_MESSAGE_HPP_
-#define MIDI_MESSAGE_HPP_
 
 // serial interface setup
 static constexpr uint32_t USART_BAUD_RATE = 31250;
