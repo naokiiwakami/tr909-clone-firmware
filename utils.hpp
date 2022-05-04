@@ -21,14 +21,6 @@ inline static void SetBit(volatile uint8_t& port, const uint8_t bit, bool onOrOf
 }
 
 /**
- * Overflow aware subtraction method
- */
-template <typename T>
-inline static T Subtract(T x, T y) {
-  return x >= y ? x - y : x + ~y + 1;
-}
-
-/**
  * Turn on/off LEDs as reflections of bits in the value.
  */
 inline void MapToLed(uint8_t value) {
@@ -39,6 +31,14 @@ inline void MapToLed(uint8_t value) {
   SetBit(PORT_LED_HAND_CLAP, BIT_LED_HAND_CLAP, (value & 0x4) != 0);
   SetBit(PORT_LED_CLOSED_HI_HAT, BIT_LED_CLOSED_HI_HAT, (value & 0x2) != 0);
   SetBit(PORT_LED_OPEN_HI_HAT, BIT_LED_OPEN_HI_HAT, (value & 0x1) != 0);
+}
+
+/**
+ * Overflow aware subtraction method
+ */
+template <typename T>
+inline static T Subtract(T x, T y) {
+  return x >= y ? x - y : x + ~y + 1;
 }
 
 template <void (*Func)()>

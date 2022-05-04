@@ -45,6 +45,8 @@ class Sequencer {
 
   uint16_t tempo_interval_count_ = 0;
   uint16_t tempo_interval_;
+  
+  uint8_t drum_masks_;
 
   // sequencer state
   uint8_t state_ = kStandBy;
@@ -60,9 +62,8 @@ class Sequencer {
 
   DinSync din_sync_;
 
-  static constexpr void (*trigger_func_[])(int8_t) = {
-      TriggerBassDrum, TriggerSnareDrum,   TriggerRimShot,
-      TriggerHandClap, TriggerClosedHiHat, TriggerOpenHiHat,
+  static constexpr void (*hit_[])(int8_t) = {
+      HitOpenHiHat, HitClosedHiHat, HitHandClap, HitRimShot, HitSnareDrum, HitBassDrum, 
   };
 
  public:
@@ -81,7 +82,7 @@ class Sequencer {
     pattern_id_ = eeprom_read_byte(E_PATTERN_ID);
     LoadPattern();
     tempo_interval_ = eeprom_read_word(reinterpret_cast<uint16_t*>(E_TEMPO));
-    SetBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
+    drum_masks_ = 0xff;
   }
 
   void LoadPattern() {
@@ -93,6 +94,8 @@ class Sequencer {
   }
 
   inline uint8_t GetState() const { return state_; }
+    
+  inline bool IsPlaying() const { return state_ == kRunning || state_ == kStopping; }
 
   inline uint16_t GetPosition() const { return position_; }
 
@@ -119,6 +122,7 @@ class Sequencer {
 
   inline void Start() {
     din_sync_.Start();
+    MapToLed(drum_masks_);
     state_ = kRunning;
   }
 
@@ -130,12 +134,18 @@ class Sequencer {
     MapToLed(0);
   }
 
-  inline void Toggle() {
+  inline void ToggleStartStop() {
     if (state_ == kStandBy) {
       Start();
     } else if (state_ == kRunning) {
       Stop();
     }
+  }
+  
+  inline void ToggleMask(uint8_t drum_index) {
+    drum_masks_ ^= _BV(drum_index);
+    // TODO: Better to toggle only changed LED
+    MapToLed(drum_masks_);
   }
 
   inline void StandByRecording() {
@@ -194,17 +204,20 @@ class Sequencer {
   template <Drum drum>
   inline void PlayPatternAt(uint8_t index, uint8_t bit) {
     constexpr uint8_t drum_index = static_cast<uint8_t>(drum);
-    constexpr auto trigger_func = trigger_func_[drum_index];
+    if (!(drum_masks_ & _BV(drum_index))) {
+      return;
+    }
+    constexpr auto hit = hit_[drum_index];
     uint8_t level = (patterns_[drum_index][index] >> bit) & 0x3;
     switch (level) {
       case 0x3:
-        trigger_func(127);
+        hit(127);
         break;
       case 0x2:
-        trigger_func(85);
+        hit(85);
         break;
       case 0x1:
-        trigger_func(50);
+        hit(50);
         break;
     }
   }
@@ -285,12 +298,29 @@ class Sequencer {
     }
   }
 
-  template <Drum drum>
+  /**
+   * Triggers an action for a drum.
+   *
+   * The action is different by the sequencer state:
+   *  - StandBy  : hit
+   *  - Running  : toggle mask
+   *  - Stopping : toggle mask
+   *  - StandByRecording : update the last trigger timestamp
+   *  - Recording : hit, update the last trigger timestamp
+   *  - FinishRecording  : No operation
+   */
+  template <Drum drum, bool is_midi = false>
   void Trigger(int8_t velocity) {
     constexpr uint8_t drum_index = static_cast<uint8_t>(drum);
-    constexpr auto trigger_func = trigger_func_[drum_index];
+    constexpr auto hit = hit_[drum_index];
+    if (state_ == kRunning || state_ == kStopping) {
+       if (!is_midi) {
+         ToggleMask(drum_index);       
+       }
+       return;
+    }
     if (state_ != kStandByRecording && state_ != kFinishingRecording) {
-      trigger_func(velocity);
+      hit(velocity);
     }
     if (state_ == kRecording || state_ == kStandByRecording) {
       last_triggers_[drum_index] = master_tempo_ticks_;
@@ -305,7 +335,7 @@ class Sequencer {
       }
     }
   }
-
+  
   inline void Tap() {
     if (tap_count_ == 0) {
       master_tempo_ticks_ = 0;
