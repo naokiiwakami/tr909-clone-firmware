@@ -87,11 +87,9 @@ class Sequencer {
   }
 
   void LoadPattern() {
-    MapToLed(0x20 >> pattern_id_);
     eeprom_read_block(patterns_,
                       reinterpret_cast<uint8_t*>(E_PATTERN) + kTotalPatternBytes * pattern_id_,
                       kTotalPatternBytes);
-    MapToLed(0);
   }
 
   inline uint8_t GetState() const { return state_; }
@@ -125,7 +123,6 @@ class Sequencer {
 
   inline void Start() {
     din_sync_.Start();
-    // MapToLed(drum_masks_);
     state_ = kRunning;
   }
 
@@ -134,7 +131,10 @@ class Sequencer {
   inline void HardStop() {
     din_sync_.Stop();
     state_ = kStandBy;
-    // MapToLed(0);
+    g_operation_mode &= ~kOperationModeRecording;
+    if (g_operation_mode & kOperationModeNormal) {
+      MapToLed(drum_masks_);
+    }
   }
 
   inline void ToggleStartStop() {
@@ -159,6 +159,7 @@ class Sequencer {
     din_sync_.Start();
     Clear();
     MapToLed(0x20 >> pattern_id_);
+    g_operation_mode |= kOperationModeRecording;
   }
 
   inline void StartRecording() {
@@ -183,7 +184,7 @@ class Sequencer {
       StartWritingTempo();
       StartWritingPattern();
     } else {
-      din_sync_.Stop();
+      HardStop();
     }
   }
 
@@ -321,7 +322,9 @@ class Sequencer {
       return;
     }
     if (state_ != kStandByRecording && state_ != kFinishingRecording) {
-      hit(velocity);
+      if (!is_midi || (drum_masks_ & _BV(drum_index))) {
+        hit(velocity);
+      }
     }
     if (state_ == kRecording || state_ == kStandByRecording) {
       last_triggers_[drum_index] = master_tempo_ticks_;
@@ -380,10 +383,7 @@ class Sequencer {
     if (++data_index_ == kTotalPatternBytes) {
       data_index_ = 0;
       eeprom_write_enabled_ &= ~kMaskPattern1;
-      if (state_ == kFinishingRecording) {
-        ClearBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
-        state_ = kStandBy;
-      }
+      HardStop();
     }
   }
 };

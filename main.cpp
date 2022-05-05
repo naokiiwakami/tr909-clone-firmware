@@ -425,7 +425,7 @@ inline void CheckInstrument(InstrumentT* instrument, volatile uint8_t& trig_port
   if (instrument->status) {
     if (--instrument->status == TRIGGER_SHUTDOWN_AT) {
       ClearBit(trig_port, trig_bit);
-    } else if (instrument->status == 0 && (g_operation_mode & kOperationModeDirectPlay)) {
+    } else if (instrument->status == 0 && LightOnHitEnabled()) {
       ClearBit(led_port, led_bit);
     }
   }
@@ -447,7 +447,7 @@ void CheckInstruments() {
   if (g_hi_hat.status) {
     if (--g_hi_hat.status == TRIGGER_SHUTDOWN_AT) {
       ClearBit(PORT_TRIG_HI_HAT, BIT_TRIG_HI_HAT);
-    } else if (g_hi_hat.status == 0 && (g_operation_mode & kOperationModeDirectPlay)) {
+    } else if (g_hi_hat.status == 0 && LightOnHitEnabled()) {
       ClearBit(PORT_LED_CLOSED_HI_HAT, BIT_LED_CLOSED_HI_HAT);
       ClearBit(PORT_LED_OPEN_HI_HAT, BIT_LED_OPEN_HI_HAT);
     }
