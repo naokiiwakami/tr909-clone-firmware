@@ -6,6 +6,7 @@
 
 #include "hi_hat_wav.hpp"
 #include "ports.hpp"
+#include "system.hpp"
 #include "utils.hpp"
 
 /**
@@ -99,28 +100,36 @@ inline void StopPcmClock() { TCCR2 = 0; }
 void HitBassDrum(int8_t velocity) {
   REGISTER_VELOCITY_BASS_DRUM = velocity << 1;
   SetBit(PORT_TRIG_BASS_DRUM, BIT_TRIG_BASS_DRUM);
-  // SetBit(PORT_LED_BASS_DRUM, BIT_LED_BASS_DRUM);
+  if (g_operation_mode & kOperationModeDirectPlay) {
+    SetBit(PORT_LED_BASS_DRUM, BIT_LED_BASS_DRUM);
+  }
   g_bass_drum.status = 255;
 }
 
 void HitSnareDrum(int8_t velocity) {
   REGISTER_VELOCITY_SNARE_DRUM = velocity << 1;
   SetBit(PORT_TRIG_SNARE_DRUM, BIT_TRIG_SNARE_DRUM);
-  // SetBit(PORT_LED_SNARE_DRUM, BIT_LED_SNARE_DRUM);
+  if (g_operation_mode & kOperationModeDirectPlay) {
+    SetBit(PORT_LED_SNARE_DRUM, BIT_LED_SNARE_DRUM);
+  }
   g_snare_drum.status = 255;
 }
 
 void HitRimShot(int8_t velocity) {
   REGISTER_VELOCITY_RIM_SHOT = velocity << 1;
   SetBit(PORT_TRIG_RIM_SHOT, BIT_TRIG_RIM_SHOT);
-  // SetBit(PORT_LED_RIM_SHOT, BIT_LED_RIM_SHOT);
+  if (g_operation_mode & kOperationModeDirectPlay) {
+    SetBit(PORT_LED_RIM_SHOT, BIT_LED_RIM_SHOT);
+  }
   g_rim_shot.status = 255;
 }
 
 void HitHandClap(int8_t velocity) {
   REGISTER_VELOCITY_HAND_CLAP = velocity;
   SetBit(PORT_TRIG_HAND_CLAP, BIT_TRIG_HAND_CLAP);
-  // SetBit(PORT_LED_HAND_CLAP, BIT_LED_HAND_CLAP);
+  if (g_operation_mode & kOperationModeDirectPlay) {
+    SetBit(PORT_LED_HAND_CLAP, BIT_LED_HAND_CLAP);
+  }
   g_hand_clap.status = 255;
 }
 
@@ -132,8 +141,10 @@ template <void (*OpenHiHatLedFunc)(volatile uint8_t&, const uint8_t),
 void HitHiHat(int8_t velocity) {
   REGISTER_VELOCITY_HI_HAT = velocity + 128;
   SetBit(PORT_TRIG_HI_HAT, BIT_TRIG_HI_HAT);
-  // OpenHiHatLedFunc(PORT_LED_OPEN_HI_HAT, BIT_LED_OPEN_HI_HAT);
-  // ClosedHiHatLedFunc(PORT_LED_CLOSED_HI_HAT, BIT_LED_CLOSED_HI_HAT);
+  if (g_operation_mode & kOperationModeDirectPlay) {
+    OpenHiHatLedFunc(PORT_LED_OPEN_HI_HAT, BIT_LED_OPEN_HI_HAT);
+    ClosedHiHatLedFunc(PORT_LED_CLOSED_HI_HAT, BIT_LED_CLOSED_HI_HAT);
+  }
   HiHatSelectFunc(PORT_SELECT_HI_HAT, BIT_SELECT_HI_HAT);
   g_hi_hat.status = 255;
   g_hi_hat.pcm_address = pcm_start;

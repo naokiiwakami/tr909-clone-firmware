@@ -7,6 +7,7 @@
 #include "din_sync.hpp"
 #include "eeprom.hpp"
 #include "instruments.hpp"
+#include "system.hpp"
 #include "utils.hpp"
 
 class Sequencer {
@@ -45,7 +46,7 @@ class Sequencer {
 
   uint16_t tempo_interval_count_ = 0;
   uint16_t tempo_interval_;
-  
+
   uint8_t drum_masks_;
 
   // sequencer state
@@ -63,7 +64,7 @@ class Sequencer {
   DinSync din_sync_;
 
   static constexpr void (*hit_[])(int8_t) = {
-      HitOpenHiHat, HitClosedHiHat, HitHandClap, HitRimShot, HitSnareDrum, HitBassDrum, 
+      HitOpenHiHat, HitClosedHiHat, HitHandClap, HitRimShot, HitSnareDrum, HitBassDrum,
   };
 
  public:
@@ -82,7 +83,7 @@ class Sequencer {
     pattern_id_ = eeprom_read_byte(E_PATTERN_ID);
     LoadPattern();
     tempo_interval_ = eeprom_read_word(reinterpret_cast<uint16_t*>(E_TEMPO));
-    drum_masks_ = 0xff;
+    drum_masks_ = 0x3f;
   }
 
   void LoadPattern() {
@@ -94,7 +95,7 @@ class Sequencer {
   }
 
   inline uint8_t GetState() const { return state_; }
-    
+
   inline bool IsPlaying() const { return state_ == kRunning || state_ == kStopping; }
 
   inline uint16_t GetPosition() const { return position_; }
@@ -110,6 +111,8 @@ class Sequencer {
     eeprom_update_byte(E_PATTERN_ID, pattern_id);
   }
 
+  inline uint8_t GetDrumMasks() const { return drum_masks_; }
+
   inline void IncrementClock() {
     din_sync_.Update();
     if (++tempo_interval_count_ >= tempo_interval_) {
@@ -122,7 +125,7 @@ class Sequencer {
 
   inline void Start() {
     din_sync_.Start();
-    MapToLed(drum_masks_);
+    // MapToLed(drum_masks_);
     state_ = kRunning;
   }
 
@@ -131,7 +134,7 @@ class Sequencer {
   inline void HardStop() {
     din_sync_.Stop();
     state_ = kStandBy;
-    MapToLed(0);
+    // MapToLed(0);
   }
 
   inline void ToggleStartStop() {
@@ -141,7 +144,7 @@ class Sequencer {
       Stop();
     }
   }
-  
+
   inline void ToggleMask(uint8_t drum_index) {
     drum_masks_ ^= _BV(drum_index);
     // TODO: Better to toggle only changed LED
@@ -313,11 +316,9 @@ class Sequencer {
   void Trigger(int8_t velocity) {
     constexpr uint8_t drum_index = static_cast<uint8_t>(drum);
     constexpr auto hit = hit_[drum_index];
-    if (state_ == kRunning || state_ == kStopping) {
-       if (!is_midi) {
-         ToggleMask(drum_index);       
-       }
-       return;
+    if (!is_midi && (g_operation_mode & kOperationModeNormal)) {
+      ToggleMask(drum_index);
+      return;
     }
     if (state_ != kStandByRecording && state_ != kFinishingRecording) {
       hit(velocity);
@@ -335,7 +336,7 @@ class Sequencer {
       }
     }
   }
-  
+
   inline void Tap() {
     if (tap_count_ == 0) {
       master_tempo_ticks_ = 0;
