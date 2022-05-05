@@ -6,18 +6,19 @@
 
 #include "hi_hat_wav.hpp"
 #include "ports.hpp"
+#include "system.hpp"
 #include "utils.hpp"
 
 /**
  * Enum used for identifying the drum type.
  */
 enum class Drum : uint8_t {
-  kBassDrum,
-  kSnareDrum,
-  kRimShot,
-  kHandClap,
-  kClosedHiHat,
   kOpenHiHat,
+  kClosedHiHat,
+  kHandClap,
+  kRimShot,
+  kSnareDrum,
+  kBassDrum,
   kOutOfRange,
 };
 
@@ -96,31 +97,39 @@ inline void StartPcmClock() {
 
 inline void StopPcmClock() { TCCR2 = 0; }
 
-void TriggerBassDrum(int8_t velocity) {
+void HitBassDrum(int8_t velocity) {
   REGISTER_VELOCITY_BASS_DRUM = velocity << 1;
   SetBit(PORT_TRIG_BASS_DRUM, BIT_TRIG_BASS_DRUM);
-  SetBit(PORT_LED_BASS_DRUM, BIT_LED_BASS_DRUM);
+  if (LightOnHitEnabled()) {
+    SetBit(PORT_LED_BASS_DRUM, BIT_LED_BASS_DRUM);
+  }
   g_bass_drum.status = 255;
 }
 
-void TriggerSnareDrum(int8_t velocity) {
+void HitSnareDrum(int8_t velocity) {
   REGISTER_VELOCITY_SNARE_DRUM = velocity << 1;
   SetBit(PORT_TRIG_SNARE_DRUM, BIT_TRIG_SNARE_DRUM);
-  SetBit(PORT_LED_SNARE_DRUM, BIT_LED_SNARE_DRUM);
+  if (LightOnHitEnabled()) {
+    SetBit(PORT_LED_SNARE_DRUM, BIT_LED_SNARE_DRUM);
+  }
   g_snare_drum.status = 255;
 }
 
-void TriggerRimShot(int8_t velocity) {
+void HitRimShot(int8_t velocity) {
   REGISTER_VELOCITY_RIM_SHOT = velocity << 1;
   SetBit(PORT_TRIG_RIM_SHOT, BIT_TRIG_RIM_SHOT);
-  SetBit(PORT_LED_RIM_SHOT, BIT_LED_RIM_SHOT);
+  if (LightOnHitEnabled()) {
+    SetBit(PORT_LED_RIM_SHOT, BIT_LED_RIM_SHOT);
+  }
   g_rim_shot.status = 255;
 }
 
-void TriggerHandClap(int8_t velocity) {
+void HitHandClap(int8_t velocity) {
   REGISTER_VELOCITY_HAND_CLAP = velocity;
   SetBit(PORT_TRIG_HAND_CLAP, BIT_TRIG_HAND_CLAP);
-  SetBit(PORT_LED_HAND_CLAP, BIT_LED_HAND_CLAP);
+  if (LightOnHitEnabled()) {
+    SetBit(PORT_LED_HAND_CLAP, BIT_LED_HAND_CLAP);
+  }
   g_hand_clap.status = 255;
 }
 
@@ -129,11 +138,13 @@ template <void (*OpenHiHatLedFunc)(volatile uint8_t&, const uint8_t),
           void (*ClosedHiHatLedFunc)(volatile uint8_t&, const uint8_t),
           void (*HiHatSelectFunc)(volatile uint8_t&, const uint8_t), uint16_t pcm_start,
           uint16_t pcm_end>
-void TriggerHiHat(int8_t velocity) {
+void HitHiHat(int8_t velocity) {
   REGISTER_VELOCITY_HI_HAT = velocity + 128;
   SetBit(PORT_TRIG_HI_HAT, BIT_TRIG_HI_HAT);
-  OpenHiHatLedFunc(PORT_LED_OPEN_HI_HAT, BIT_LED_OPEN_HI_HAT);
-  ClosedHiHatLedFunc(PORT_LED_CLOSED_HI_HAT, BIT_LED_CLOSED_HI_HAT);
+  if (LightOnHitEnabled()) {
+    OpenHiHatLedFunc(PORT_LED_OPEN_HI_HAT, BIT_LED_OPEN_HI_HAT);
+    ClosedHiHatLedFunc(PORT_LED_CLOSED_HI_HAT, BIT_LED_CLOSED_HI_HAT);
+  }
   HiHatSelectFunc(PORT_SELECT_HI_HAT, BIT_SELECT_HI_HAT);
   g_hi_hat.status = 255;
   g_hi_hat.pcm_address = pcm_start;
@@ -143,12 +154,12 @@ void TriggerHiHat(int8_t velocity) {
   StartPcmClock();
 }
 
-inline void TriggerOpenHiHat(int8_t velocity) {
-  TriggerHiHat<SetBit, ClearBit, SetBit, 0, ADDRESS_CLOSED_HI_HAT_START>(velocity);
+inline void HitOpenHiHat(int8_t velocity) {
+  HitHiHat<SetBit, ClearBit, SetBit, 0, ADDRESS_CLOSED_HI_HAT_START>(velocity);
 }
 
-inline void TriggerClosedHiHat(int8_t velocity) {
-  TriggerHiHat<ClearBit, SetBit, ClearBit, ADDRESS_CLOSED_HI_HAT_START, ADDRESS_END>(velocity);
+inline void HitClosedHiHat(int8_t velocity) {
+  HitHiHat<ClearBit, SetBit, ClearBit, ADDRESS_CLOSED_HI_HAT_START, ADDRESS_END>(velocity);
 }
 
 #endif /* INSTRUMENTS_H_ */

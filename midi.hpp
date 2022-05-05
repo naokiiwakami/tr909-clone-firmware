@@ -55,13 +55,19 @@ class MidiReceiver {
     if (next_byte >= 0xf0) {
       switch (next_byte) {
         case MIDI_REALTIME_START:
-          g_sequencer.StartRecording();
+          if (!g_sequencer.IsPlaying()) {
+            g_sequencer.StartRecording();
+          }
           break;
         case MIDI_REALTIME_CLOCK:
-          g_sequencer.StepForwardRecording();
+          if (!g_sequencer.IsPlaying()) {
+            g_sequencer.StepForwardRecording();
+          }            
           break;
         case MIDI_REALTIME_STOP:
-          g_sequencer.EndRecording();
+          if (!g_sequencer.IsPlaying()) {
+            g_sequencer.EndRecording();
+          }            
           break;
       }
       return;
@@ -99,22 +105,22 @@ class MidiReceiver {
         auto& note = data_[0];
         switch (note) {
           case MIDI_NOTE_BASS_DRUM:
-            g_sequencer.Trigger<Drum::kBassDrum>(velocity);
+            g_sequencer.Trigger<Drum::kBassDrum, true>(velocity);
             break;
           case MIDI_NOTE_SNARE_DRUM:
-            g_sequencer.Trigger<Drum::kSnareDrum>(velocity);
+            g_sequencer.Trigger<Drum::kSnareDrum, true>(velocity);
             break;
           case MIDI_NOTE_RIM_SHOT:
-            g_sequencer.Trigger<Drum::kRimShot>(velocity);
+            g_sequencer.Trigger<Drum::kRimShot, true>(velocity);
             break;
           case MIDI_NOTE_HAND_CLAP:
-            g_sequencer.Trigger<Drum::kHandClap>(velocity);
+            g_sequencer.Trigger<Drum::kHandClap, true>(velocity);
             break;
           case MIDI_NOTE_CLOSED_HI_HAT:
-            g_sequencer.Trigger<Drum::kClosedHiHat>(velocity);
+            g_sequencer.Trigger<Drum::kClosedHiHat, true>(velocity);
             break;
           case MIDI_NOTE_OPEN_HI_HAT:
-            g_sequencer.Trigger<Drum::kOpenHiHat>(velocity);
+            g_sequencer.Trigger<Drum::kOpenHiHat, true>(velocity);
             break;
         }
       } break;

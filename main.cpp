@@ -15,6 +15,9 @@
 #include "system.hpp"
 #include "utils.hpp"
 
+// Operation mode //////////////////////////////////
+uint8_t g_operation_mode;
+
 // Instruments /////////////////////////////////////
 bass_drum_t g_bass_drum;
 snare_drum_t g_snare_drum;
@@ -281,7 +284,11 @@ void ChangePattern() {
           } else if (!(current_switches & _BV(BIT_SW_RIM_SHOT))) {
             pattern_id = 2;
           } else if (!(current_switches & _BV(BIT_SW_DIN_MUTE))) {
-            MapToLed(0);
+            if (g_operation_mode & kOperationModeDirectPlay) {
+              MapToLed(0);
+            } else {
+              MapToLed(g_sequencer.GetDrumMasks());
+            }
             g_sequencer.SetPatternId(pattern_id);
             g_sequencer.LoadPattern();
             return;
@@ -339,6 +346,8 @@ void SetUp() {
   g_midi_receiver.Initialize();
   g_sequencer.Initialize();
 
+  g_operation_mode = kOperationModeNormal;
+
   sei();
 }
 
@@ -351,9 +360,18 @@ Sequencer g_sequencer{};
 
 inline void Tap() { g_sequencer.Tap(); }
 
+inline void ToggleOperationMode() {
+  g_operation_mode ^= 0x3;
+  if (g_operation_mode & kOperationModeNormal) {
+    MapToLed(g_sequencer.GetDrumMasks());
+  } else {
+    MapToLed(0);
+  }
+}
+
 inline void SequencerStandByRecording() { g_sequencer.StandByRecording(); }
 
-inline void ToggleSequencer() { g_sequencer.Toggle(); }
+inline void ToggleSequencer() { g_sequencer.ToggleStartStop(); }
 
 inline void OnShift() {
   if (g_sequencer.GetState() & (Sequencer::kStandByRecording | Sequencer::kRecording)) {
@@ -380,6 +398,7 @@ void CheckSwitches(uint8_t prev_switches, uint8_t new_switches) {
     } else {
       CheckSwitch<OnShift>(prev_switches, new_switches, BIT_SW_SHIFT);
       CheckSwitch<Tap>(prev_switches, new_switches, BIT_SW_BASS_DRUM);
+      CheckSwitch<ToggleOperationMode>(prev_switches, new_switches, BIT_SW_SNARE_DRUM);
       CheckSwitch<SequencerStandByRecording>(prev_switches, new_switches, BIT_SW_DIN_MUTE);
       g_prev_switches = new_switches;
     }
@@ -406,7 +425,7 @@ inline void CheckInstrument(InstrumentT* instrument, volatile uint8_t& trig_port
   if (instrument->status) {
     if (--instrument->status == TRIGGER_SHUTDOWN_AT) {
       ClearBit(trig_port, trig_bit);
-    } else if (instrument->status == 0) {
+    } else if (instrument->status == 0 && LightOnHitEnabled()) {
       ClearBit(led_port, led_bit);
     }
   }
@@ -428,7 +447,7 @@ void CheckInstruments() {
   if (g_hi_hat.status) {
     if (--g_hi_hat.status == TRIGGER_SHUTDOWN_AT) {
       ClearBit(PORT_TRIG_HI_HAT, BIT_TRIG_HI_HAT);
-    } else if (g_hi_hat.status == 0) {
+    } else if (g_hi_hat.status == 0 && LightOnHitEnabled()) {
       ClearBit(PORT_LED_CLOSED_HI_HAT, BIT_LED_CLOSED_HI_HAT);
       ClearBit(PORT_LED_OPEN_HI_HAT, BIT_LED_OPEN_HI_HAT);
     }
@@ -444,6 +463,10 @@ int main(void) {
     SetUpMidi();
   } else {
     StartupSequence();
+  }
+
+  if (g_operation_mode & kOperationModeNormal) {
+    MapToLed(g_sequencer.GetDrumMasks());
   }
 
   uint8_t prev_timer_value = 0;
