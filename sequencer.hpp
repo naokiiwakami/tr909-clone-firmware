@@ -54,11 +54,12 @@ class Sequencer {
 
   // eeprom control
   // masks for eeprom_write_enabled_ bits
-  static constexpr uint8_t kMaskMidiCh = 0x1;
-  static constexpr uint8_t kMaskTempo = 0x2;
-  static constexpr uint8_t kMaskPattern1 = 0x4;
+  static constexpr uint8_t kWriteMidiCh = 0x1;
+  static constexpr uint8_t kWriteTempo = 0x2;
+  static constexpr uint8_t kWritePattern = 0x4;
+  static constexpr uint8_t kReadPattern = 0x8;
 
-  uint8_t eeprom_write_enabled_ = 0;
+  uint8_t eeprom_statuses_ = 0;
   int16_t data_index_ = 0;
 
   DinSync din_sync_;
@@ -188,10 +189,10 @@ class Sequencer {
     }
   }
 
-  inline void StartWritingTempo() { eeprom_write_enabled_ |= kMaskTempo; }
+  inline void StartWritingTempo() { eeprom_statuses_ |= kWriteTempo; }
 
   inline void StartWritingPattern() {
-    eeprom_write_enabled_ |= kMaskPattern1;
+    eeprom_statuses_ |= kWritePattern;
     data_index_ = 0;
   }
 
@@ -362,13 +363,13 @@ class Sequencer {
   }
 
   inline void Poll() {
-    if (eeprom_write_enabled_ == 0 || !eeprom_is_ready()) {
+    if (eeprom_statuses_ == 0 || !eeprom_is_ready()) {
       return;
     }
 
-    if (eeprom_write_enabled_ & kMaskTempo) {
+    if (eeprom_statuses_ & kWriteTempo) {
       eeprom_write_word(reinterpret_cast<uint16_t*>(E_TEMPO), tempo_interval_);
-      eeprom_write_enabled_ &= ~kMaskTempo;
+      eeprom_statuses_ &= ~kWriteTempo;
       return;
     }
 
@@ -382,7 +383,7 @@ class Sequencer {
 
     if (++data_index_ == kTotalPatternBytes) {
       data_index_ = 0;
-      eeprom_write_enabled_ &= ~kMaskPattern1;
+      eeprom_statuses_ &= ~kWritePattern;
       HardStop();
     }
   }
