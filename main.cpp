@@ -370,17 +370,24 @@ void ChangePattern() {
 inline void ToggleSequencer() { g_sequencer.ToggleStartStop(); }
 
 template <Drum drum>
+void SwitchPattern() {
+  constexpr int8_t pattern_id = kNumDrums - static_cast<int8_t>(drum) - 1;
+  if (pattern_id != g_sequencer.GetPatternId()) {
+    g_sequencer.SetPatternId(pattern_id);
+    g_sequencer.LoadPattern();
+    MapToLed(0x20 >> pattern_id);
+  }
+}
+
+template <Drum drum>
 void CheckDrumSwitch(uint8_t prev_switches, uint8_t new_switches, uint8_t switch_bit) {
   if ((prev_switches & _BV(switch_bit)) && !(new_switches & _BV(switch_bit))) {
     if (g_operation_mode & kOperationModeChangePattern) {
-      constexpr int8_t pattern_id = kNumDrums - static_cast<int8_t>(drum) - 1;
-      if (pattern_id != g_sequencer.GetPatternId()) {
-        g_sequencer.SetPatternId(pattern_id);
-        g_sequencer.LoadPattern();
-        MapToLed(0x20 >> pattern_id);
-      }
+      SwitchPattern<drum>();
       g_operation_mode = kOperationModePatternChanged;
       g_pattern_changed_countdown = 8;
+    } else if (g_sequencer.GetState() == Sequencer::kStandByRecording) {
+      SwitchPattern<drum>();
     } else {
       g_sequencer.Trigger<drum>(127);
     }
