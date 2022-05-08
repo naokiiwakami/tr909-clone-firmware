@@ -12,8 +12,8 @@
 
 class Sequencer {
  public:
-  static constexpr int kNumDrums = static_cast<int>(Drum::kOutOfRange);
-  static constexpr int kNumBars = 4;
+  // static constexpr int kNumDrums = static_cast<int>(Drum::kOutOfRange);
+  static constexpr int kNumBars = 2;
   static constexpr int kClocksPerQuarterNote = 24;
   static constexpr int kClocksPerBar = kClocksPerQuarterNote * 4;
   static constexpr int kTotalClocks = kNumBars * kClocksPerBar;
@@ -54,11 +54,12 @@ class Sequencer {
 
   // eeprom control
   // masks for eeprom_write_enabled_ bits
-  static constexpr uint8_t kMaskMidiCh = 0x1;
-  static constexpr uint8_t kMaskTempo = 0x2;
-  static constexpr uint8_t kMaskPattern1 = 0x4;
+  static constexpr uint8_t kWriteMidiCh = 0x1;
+  static constexpr uint8_t kWriteTempo = 0x2;
+  static constexpr uint8_t kWritePattern = 0x4;
+  static constexpr uint8_t kReadPattern = 0x8;
 
-  uint8_t eeprom_write_enabled_ = 0;
+  uint8_t eeprom_statuses_ = 0;
   int16_t data_index_ = 0;
 
   DinSync din_sync_;
@@ -86,11 +87,7 @@ class Sequencer {
     drum_masks_ = 0x3f;
   }
 
-  void LoadPattern() {
-    eeprom_read_block(patterns_,
-                      reinterpret_cast<uint8_t*>(E_PATTERN) + kTotalPatternBytes * pattern_id_,
-                      kTotalPatternBytes);
-  }
+  void LoadPattern() { eeprom_statuses_ |= kReadPattern; }
 
   inline uint8_t GetState() const { return state_; }
 
@@ -188,10 +185,10 @@ class Sequencer {
     }
   }
 
-  inline void StartWritingTempo() { eeprom_write_enabled_ |= kMaskTempo; }
+  inline void StartWritingTempo() { eeprom_statuses_ |= kWriteTempo; }
 
   inline void StartWritingPattern() {
-    eeprom_write_enabled_ |= kMaskPattern1;
+    eeprom_statuses_ |= kWritePattern;
     data_index_ = 0;
   }
 
@@ -362,28 +359,52 @@ class Sequencer {
   }
 
   inline void Poll() {
-    if (eeprom_write_enabled_ == 0 || !eeprom_is_ready()) {
+    if (eeprom_statuses_ == 0 || !eeprom_is_ready()) {
       return;
     }
 
-    if (eeprom_write_enabled_ & kMaskTempo) {
+    if (eeprom_statuses_ & kWriteTempo) {
       eeprom_write_word(reinterpret_cast<uint16_t*>(E_TEMPO), tempo_interval_);
-      eeprom_write_enabled_ &= ~kMaskTempo;
+      eeprom_statuses_ &= ~kWriteTempo;
       return;
     }
 
-    if ((data_index_ & 0xf) == 0) {
-      ToggleBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
+    if (eeprom_statuses_ & kWritePattern) {
+      if ((data_index_ & 0xf) == 0) {
+        ToggleBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
+      }
+
+      uint8_t* ptr = &patterns_[0][0];
+      eeprom_write_async(E_PATTERN + kTotalPatternBytes * pattern_id_ + data_index_,
+                         ptr[data_index_]);
+
+      if (++data_index_ == kTotalPatternBytes) {
+        data_index_ = 0;
+        eeprom_statuses_ &= ~kWritePattern;
+        HardStop();
+      }
+      return;
     }
 
-    uint8_t* ptr = &patterns_[0][0];
-    eeprom_write_async(E_PATTERN + kTotalPatternBytes * pattern_id_ + data_index_,
-                       ptr[data_index_]);
+    if (eeprom_statuses_ & kReadPattern) {
+      uint16_t index_stop;
+      if (state_ == kRunning || state_ == kStopping) {
+        index_stop = ((position_ + 1) / 8) * kBitsPerStep;
+      } else {
+        index_stop = kPatternBytes;
+      }
+      for (int idrum = 0; idrum < kNumDrums; ++idrum) {
+        eeprom_read_block(&patterns_[idrum][data_index_],
+                          reinterpret_cast<uint8_t*>(E_PATTERN) + kTotalPatternBytes * pattern_id_ +
+                              kPatternBytes * idrum + data_index_,
+                          index_stop - data_index_);
+      }
+      data_index_ = index_stop;
 
-    if (++data_index_ == kTotalPatternBytes) {
-      data_index_ = 0;
-      eeprom_write_enabled_ &= ~kMaskPattern1;
-      HardStop();
+      if (data_index_ == kPatternBytes) {
+        data_index_ = 0;
+        eeprom_statuses_ &= ~kReadPattern;
+      }
     }
   }
 };

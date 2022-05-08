@@ -17,6 +17,8 @@
 
 // Operation mode //////////////////////////////////
 uint8_t g_operation_mode;
+uint8_t g_operation_mode_prev;
+uint8_t g_pattern_changed_countdown;
 
 // Instruments /////////////////////////////////////
 bass_drum_t g_bass_drum;
@@ -259,48 +261,6 @@ void SetUpMidi() {
   MapToLed(0);
 }
 
-volatile uint8_t g_prev_switches;
-
-void ChangePattern() {
-  uint8_t prev_timer_value = 0;
-  uint16_t divider = 0;
-  uint8_t pattern_id = g_sequencer.GetPatternId();
-  MapToLed(0x20 >> pattern_id);
-  while (true) {
-    uint8_t current_timer_value = TCNT0;
-    if (current_timer_value < prev_timer_value) {
-      ++divider;
-      if ((divider & 0xff) == 0) {  // every 256 cycles = 32ms
-        if ((divider & 0x1ff) == 0) {
-          ToggleBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
-        }
-        uint8_t current_switches = PORT_SWITCHES;
-        if (current_switches != g_prev_switches) {
-          g_prev_switches = current_switches;
-          if (!(current_switches & _BV(BIT_SW_BASS_DRUM))) {
-            pattern_id = 0;
-          } else if (!(current_switches & _BV(BIT_SW_SNARE_DRUM))) {
-            pattern_id = 1;
-          } else if (!(current_switches & _BV(BIT_SW_RIM_SHOT))) {
-            pattern_id = 2;
-          } else if (!(current_switches & _BV(BIT_SW_DIN_MUTE))) {
-            if (g_operation_mode & kOperationModeDirectPlay) {
-              MapToLed(0);
-            } else {
-              MapToLed(g_sequencer.GetDrumMasks());
-            }
-            g_sequencer.SetPatternId(pattern_id);
-            g_sequencer.LoadPattern();
-            return;
-          }
-          MapToLed(0x20 >> pattern_id);
-        }
-      }
-    }
-    prev_timer_value = current_timer_value;
-  }
-}
-
 void StartupSequence() {
   volatile uint8_t prev_timer_value = 0;
   uint8_t blink_left = 11;
@@ -347,6 +307,7 @@ void SetUp() {
   g_sequencer.Initialize();
 
   g_operation_mode = kOperationModeNormal;
+  g_pattern_changed_countdown = 0;
 
   sei();
 }
@@ -358,9 +319,22 @@ static constexpr uint8_t kTapHistory = 2;
 
 Sequencer g_sequencer{};
 
+inline void OnShift() {
+  if (g_sequencer.GetState() & (Sequencer::kStandByRecording | Sequencer::kRecording)) {
+    g_sequencer.HardStop();
+    g_sequencer.LoadPattern();
+    ClearBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
+  }
+}
+
 inline void Tap() { g_sequencer.Tap(); }
 
 inline void ToggleOperationMode() {
+  if (g_operation_mode &
+      (kOperationModeRecording | kOperationModeChangePattern | kOperationModePatternChanged)) {
+    return;
+  }
+
   g_operation_mode ^= 0x3;
   if (g_operation_mode & kOperationModeNormal) {
     MapToLed(g_sequencer.GetDrumMasks());
@@ -371,20 +345,45 @@ inline void ToggleOperationMode() {
 
 inline void SequencerStandByRecording() { g_sequencer.StandByRecording(); }
 
-inline void ToggleSequencer() { g_sequencer.ToggleStartStop(); }
+volatile uint8_t g_prev_switches;
 
-inline void OnShift() {
-  if (g_sequencer.GetState() & (Sequencer::kStandByRecording | Sequencer::kRecording)) {
-    g_sequencer.HardStop();
-    g_sequencer.LoadPattern();
-    ClearBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
+void ChangePattern() {
+  if (g_operation_mode & (kOperationModeRecording | kOperationModePatternChanged)) {
+    return;
+  }
+
+  if (g_operation_mode & kOperationModeChangePattern) {
+    g_operation_mode = g_operation_mode_prev;
+    if (g_operation_mode & kOperationModeNormal) {
+      MapToLed(g_sequencer.GetDrumMasks());
+    } else {
+      MapToLed(0);
+    }
+  } else {
+    g_operation_mode_prev = g_operation_mode;
+    g_operation_mode &= ~(kOperationModeNormal | kOperationModeDirectPlay);
+    g_operation_mode |= kOperationModeChangePattern;
+    MapToLed(0x20 >> g_sequencer.GetPatternId());
   }
 }
+
+inline void ToggleSequencer() { g_sequencer.ToggleStartStop(); }
 
 template <Drum drum>
 void CheckDrumSwitch(uint8_t prev_switches, uint8_t new_switches, uint8_t switch_bit) {
   if ((prev_switches & _BV(switch_bit)) && !(new_switches & _BV(switch_bit))) {
-    g_sequencer.Trigger<drum>(127);
+    if (g_operation_mode & kOperationModeChangePattern) {
+      constexpr int8_t pattern_id = kNumDrums - static_cast<int8_t>(drum) - 1;
+      if (pattern_id != g_sequencer.GetPatternId()) {
+        g_sequencer.SetPatternId(pattern_id);
+        g_sequencer.LoadPattern();
+        MapToLed(0x20 >> pattern_id);
+      }
+      g_operation_mode = kOperationModePatternChanged;
+      g_pattern_changed_countdown = 8;
+    } else {
+      g_sequencer.Trigger<drum>(127);
+    }
   }
 }
 
@@ -393,15 +392,12 @@ void CheckSwitches(uint8_t prev_switches, uint8_t new_switches) {
     return;
   }
   if ((new_switches & _BV(BIT_SW_SHIFT)) == 0) {
-    if (!(new_switches & _BV(BIT_SW_OPEN_HI_HAT))) {
-      ChangePattern();
-    } else {
-      CheckSwitch<OnShift>(prev_switches, new_switches, BIT_SW_SHIFT);
-      CheckSwitch<Tap>(prev_switches, new_switches, BIT_SW_BASS_DRUM);
-      CheckSwitch<ToggleOperationMode>(prev_switches, new_switches, BIT_SW_SNARE_DRUM);
-      CheckSwitch<SequencerStandByRecording>(prev_switches, new_switches, BIT_SW_DIN_MUTE);
-      g_prev_switches = new_switches;
-    }
+    CheckSwitch<OnShift>(prev_switches, new_switches, BIT_SW_SHIFT);
+    CheckSwitch<Tap>(prev_switches, new_switches, BIT_SW_BASS_DRUM);
+    CheckSwitch<ToggleOperationMode>(prev_switches, new_switches, BIT_SW_SNARE_DRUM);
+    CheckSwitch<SequencerStandByRecording>(prev_switches, new_switches, BIT_SW_DIN_MUTE);
+    CheckSwitch<ChangePattern>(prev_switches, new_switches, BIT_SW_OPEN_HI_HAT);
+    g_prev_switches = new_switches;
     return;
   }
   if (g_sequencer.GetTapCount() > 0) {
@@ -492,6 +488,14 @@ int main(void) {
 
         if ((divider & 0x7f) == 0) {  // every 128 cycles = 16ms
           g_adc.Update();
+          if (g_pattern_changed_countdown > 0 && --g_pattern_changed_countdown == 0) {
+            g_operation_mode = g_operation_mode_prev;
+            if (g_operation_mode & kOperationModeDirectPlay) {
+              MapToLed(0);
+            } else {
+              MapToLed(g_sequencer.GetDrumMasks());
+            }
+          }
         }
       }
     }
