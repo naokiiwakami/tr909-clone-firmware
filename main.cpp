@@ -263,7 +263,6 @@ void SetUpMidi() {
 
 volatile uint8_t g_prev_switches;
 
-#if 1
 void ChangePattern() {
   if (ModeChangeProhibited()) {
     return;
@@ -273,47 +272,6 @@ void ChangePattern() {
   g_operation_mode |= kOperationModeChangePattern;
   MapToLed(0x20 >> g_sequencer.GetPatternId());
 }
-#else
-void ChangePattern() {
-  uint8_t prev_timer_value = 0;
-  uint16_t divider = 0;
-  uint8_t pattern_id = g_sequencer.GetPatternId();
-  MapToLed(0x20 >> pattern_id);
-  while (true) {
-    uint8_t current_timer_value = TCNT0;
-    if (current_timer_value < prev_timer_value) {
-      ++divider;
-      if ((divider & 0xff) == 0) {  // every 256 cycles = 32ms
-        if ((divider & 0x1ff) == 0) {
-          ToggleBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
-        }
-        uint8_t current_switches = PORT_SWITCHES;
-        if (current_switches != g_prev_switches) {
-          g_prev_switches = current_switches;
-          if (!(current_switches & _BV(BIT_SW_BASS_DRUM))) {
-            pattern_id = 0;
-          } else if (!(current_switches & _BV(BIT_SW_SNARE_DRUM))) {
-            pattern_id = 1;
-          } else if (!(current_switches & _BV(BIT_SW_RIM_SHOT))) {
-            pattern_id = 2;
-          } else if (!(current_switches & _BV(BIT_SW_DIN_MUTE))) {
-            if (g_operation_mode & kOperationModeDirectPlay) {
-              MapToLed(0);
-            } else {
-              MapToLed(g_sequencer.GetDrumMasks());
-            }
-            g_sequencer.SetPatternId(pattern_id);
-            g_sequencer.LoadPattern();
-            return;
-          }
-          MapToLed(0x20 >> pattern_id);
-        }
-      }
-    }
-    prev_timer_value = current_timer_value;
-  }
-}
-#endif
 
 void StartupSequence() {
   volatile uint8_t prev_timer_value = 0;

@@ -87,11 +87,7 @@ class Sequencer {
     drum_masks_ = 0x3f;
   }
 
-  void LoadPattern() {
-    eeprom_read_block(patterns_,
-                      reinterpret_cast<uint8_t*>(E_PATTERN) + kTotalPatternBytes * pattern_id_,
-                      kTotalPatternBytes);
-  }
+  void LoadPattern() { eeprom_statuses_ |= kReadPattern; }
 
   inline uint8_t GetState() const { return state_; }
 
@@ -373,18 +369,42 @@ class Sequencer {
       return;
     }
 
-    if ((data_index_ & 0xf) == 0) {
-      ToggleBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
+    if (eeprom_statuses_ & kWritePattern) {
+      if ((data_index_ & 0xf) == 0) {
+        ToggleBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
+      }
+
+      uint8_t* ptr = &patterns_[0][0];
+      eeprom_write_async(E_PATTERN + kTotalPatternBytes * pattern_id_ + data_index_,
+                         ptr[data_index_]);
+
+      if (++data_index_ == kTotalPatternBytes) {
+        data_index_ = 0;
+        eeprom_statuses_ &= ~kWritePattern;
+        HardStop();
+      }
+      return;
     }
 
-    uint8_t* ptr = &patterns_[0][0];
-    eeprom_write_async(E_PATTERN + kTotalPatternBytes * pattern_id_ + data_index_,
-                       ptr[data_index_]);
+    if (eeprom_statuses_ & kReadPattern) {
+      uint16_t index_stop;
+      if (state_ == kRunning || state_ == kStopping) {
+        index_stop = ((position_ + 1) / 8) * kBitsPerStep;
+      } else {
+        index_stop = kPatternBytes;
+      }
+      for (int idrum = 0; idrum < kNumDrums; ++idrum) {
+        eeprom_read_block(&patterns_[idrum][data_index_],
+                          reinterpret_cast<uint8_t*>(E_PATTERN) + kTotalPatternBytes * pattern_id_ +
+                              kPatternBytes * idrum + data_index_,
+                          index_stop - data_index_);
+      }
+      data_index_ = index_stop;
 
-    if (++data_index_ == kTotalPatternBytes) {
-      data_index_ = 0;
-      eeprom_statuses_ &= ~kWritePattern;
-      HardStop();
+      if (data_index_ == kPatternBytes) {
+        data_index_ = 0;
+        eeprom_statuses_ &= ~kReadPattern;
+      }
     }
   }
 };
