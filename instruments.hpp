@@ -22,6 +22,8 @@ enum class Drum : uint8_t {
   kOutOfRange,
 };
 
+static constexpr int kNumDrums = static_cast<int>(Drum::kOutOfRange);
+
 typedef struct bass_drum {
   uint8_t status;
 } bass_drum_t;

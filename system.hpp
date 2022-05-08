@@ -21,9 +21,4 @@ inline bool LightOnHitEnabled() {
   return (g_operation_mode & (kOperationModeDirectPlay | kOperationModeRecording));
 }
 
-inline bool ModeChangeProhibited() {
-  return (g_operation_mode &
-          (kOperationModeRecording | kOperationModeChangePattern | kOperationModePatternChanged));
-}
-
 #endif  // SYSTEM_HPP_

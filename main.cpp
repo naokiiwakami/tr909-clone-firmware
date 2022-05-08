@@ -261,18 +261,6 @@ void SetUpMidi() {
   MapToLed(0);
 }
 
-volatile uint8_t g_prev_switches;
-
-void ChangePattern() {
-  if (ModeChangeProhibited()) {
-    return;
-  }
-  g_operation_mode_prev = g_operation_mode;
-  g_operation_mode &= ~(kOperationModeNormal | kOperationModeDirectPlay);
-  g_operation_mode |= kOperationModeChangePattern;
-  MapToLed(0x20 >> g_sequencer.GetPatternId());
-}
-
 void StartupSequence() {
   volatile uint8_t prev_timer_value = 0;
   uint8_t blink_left = 11;
@@ -331,10 +319,19 @@ static constexpr uint8_t kTapHistory = 2;
 
 Sequencer g_sequencer{};
 
+inline void OnShift() {
+  if (g_sequencer.GetState() & (Sequencer::kStandByRecording | Sequencer::kRecording)) {
+    g_sequencer.HardStop();
+    g_sequencer.LoadPattern();
+    ClearBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
+  }
+}
+
 inline void Tap() { g_sequencer.Tap(); }
 
 inline void ToggleOperationMode() {
-  if (ModeChangeProhibited()) {
+  if (g_operation_mode &
+      (kOperationModeRecording | kOperationModeChangePattern | kOperationModePatternChanged)) {
     return;
   }
 
@@ -348,43 +345,42 @@ inline void ToggleOperationMode() {
 
 inline void SequencerStandByRecording() { g_sequencer.StandByRecording(); }
 
-inline void ToggleSequencer() { g_sequencer.ToggleStartStop(); }
+volatile uint8_t g_prev_switches;
 
-inline void OnShift() {
-  if (g_sequencer.GetState() & (Sequencer::kStandByRecording | Sequencer::kRecording)) {
-    g_sequencer.HardStop();
-    g_sequencer.LoadPattern();
-    ClearBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
+void ChangePattern() {
+  if (g_operation_mode & (kOperationModeRecording | kOperationModePatternChanged)) {
+    return;
+  }
+
+  if (g_operation_mode & kOperationModeChangePattern) {
+    g_operation_mode = g_operation_mode_prev;
+    if (g_operation_mode & kOperationModeNormal) {
+      MapToLed(g_sequencer.GetDrumMasks());
+    } else {
+      MapToLed(0);
+    }
+  } else {
+    g_operation_mode_prev = g_operation_mode;
+    g_operation_mode &= ~(kOperationModeNormal | kOperationModeDirectPlay);
+    g_operation_mode |= kOperationModeChangePattern;
+    MapToLed(0x20 >> g_sequencer.GetPatternId());
   }
 }
+
+inline void ToggleSequencer() { g_sequencer.ToggleStartStop(); }
 
 template <Drum drum>
 void CheckDrumSwitch(uint8_t prev_switches, uint8_t new_switches, uint8_t switch_bit) {
   if ((prev_switches & _BV(switch_bit)) && !(new_switches & _BV(switch_bit))) {
     if (g_operation_mode & kOperationModeChangePattern) {
-      int8_t pattern_id;
-      switch (drum) {
-        case Drum::kBassDrum:
-          pattern_id = 0;
-          break;
-        case Drum::kSnareDrum:
-          pattern_id = 1;
-          break;
-        case Drum::kRimShot:
-          pattern_id = 2;
-          break;
-        default:
-          pattern_id = -1;
+      constexpr int8_t pattern_id = kNumDrums - static_cast<int8_t>(drum) - 1;
+      if (pattern_id != g_sequencer.GetPatternId()) {
+        g_sequencer.SetPatternId(pattern_id);
+        g_sequencer.LoadPattern();
+        MapToLed(0x20 >> pattern_id);
       }
-      if (pattern_id >= 0) {
-        if (pattern_id != g_sequencer.GetPatternId()) {
-          g_sequencer.SetPatternId(pattern_id);
-          g_sequencer.LoadPattern();
-          MapToLed(0x20 >> pattern_id);
-        }
-        g_operation_mode = kOperationModePatternChanged;
-        g_pattern_changed_countdown = 8;
-      }
+      g_operation_mode = kOperationModePatternChanged;
+      g_pattern_changed_countdown = 8;
     } else {
       g_sequencer.Trigger<drum>(127);
     }

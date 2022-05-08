@@ -12,8 +12,8 @@
 
 class Sequencer {
  public:
-  static constexpr int kNumDrums = static_cast<int>(Drum::kOutOfRange);
-  static constexpr int kNumBars = 4;
+  // static constexpr int kNumDrums = static_cast<int>(Drum::kOutOfRange);
+  static constexpr int kNumBars = 2;
   static constexpr int kClocksPerQuarterNote = 24;
   static constexpr int kClocksPerBar = kClocksPerQuarterNote * 4;
   static constexpr int kTotalClocks = kNumBars * kClocksPerBar;
