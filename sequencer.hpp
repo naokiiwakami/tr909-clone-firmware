@@ -25,11 +25,6 @@ class Sequencer {
 
   uint32_t master_tempo_ticks_ = 0;
 
-  // tap tempo
-  uint8_t tap_count_ = 0;
-  int8_t tap_current_ = 0;
-  uint32_t ticks_history_[kTapHistory];
-
   // pattern recording
   uint32_t ticks_last_quarter_note_;
   uint32_t ticks_last_clock_;
@@ -50,6 +45,13 @@ class Sequencer {
 
   // sequencer state
   uint8_t state_ = kStandBy;
+
+  // tap tempo
+  uint8_t tap_count_ = 0;
+  int8_t tap_current_ = 0;
+  uint32_t ticks_history_[kTapHistory];
+  int16_t tap_shift_;
+  uint16_t tempo_interval_temp_;
 
   // eeprom control
   // masks for eeprom_write_enabled_ bits
@@ -95,7 +97,6 @@ class Sequencer {
   inline uint16_t GetPosition() const { return position_; }
 
   inline uint8_t GetTapCount() const { return tap_count_; }
-  inline void ResetTapCount() { tap_count_ = 0; }
 
   inline uint16_t GetTempoInterval() const { return tempo_interval_; }
 
@@ -340,12 +341,20 @@ class Sequencer {
     if (tap_count_ == 0) {
       master_tempo_ticks_ = 0;
       tap_current_ = kTapHistory - 1;
+      tap_shift_ = 0;
+      tempo_interval_temp_ = tempo_interval_;
       SetBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
     } else {
-      uint32_t diff = Subtract<uint32_t>(
+      uint32_t temp = Subtract<uint32_t>(
           master_tempo_ticks_, ticks_history_[(tap_current_ + (tap_count_ - 1)) % kTapHistory]);
-      diff /= 24 * tap_count_;
-      tempo_interval_ = diff;
+      temp /= 24 * tap_count_;
+      tempo_interval_temp_ = temp;
+
+      // Adjust the interval to get the beat in sync with the taps.
+      uint8_t shift = position_ % 24 - 12;
+      temp = tempo_interval_temp_ * (32 * 8 + shift);
+      temp /= (32 * 8);
+      tempo_interval_ = temp;
 
       if (--tap_current_ < 0) {
         tap_current_ = kTapHistory - 1;
@@ -355,6 +364,12 @@ class Sequencer {
     if (tap_count_ < kTapHistory) {
       ++tap_count_;
     }
+  }
+
+  inline void FinishTempoTap() {
+    tempo_interval_ = tempo_interval_temp_;
+    tap_count_ = 0;
+    StartWritingTempo();
   }
 
   inline void Poll() {
