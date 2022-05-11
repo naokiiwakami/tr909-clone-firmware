@@ -228,7 +228,7 @@ class Sequencer {
    */
   void StepForward() {
     // cosmetic: Blink DIN Mute LED fast during StandByRecording mode
-    if ((state_ & kStandByRecording) && (position_ & 0x3)) {
+    if (state_ & kStandByRecording) {
       ToggleBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
     }
 
