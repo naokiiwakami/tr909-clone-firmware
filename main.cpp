@@ -427,7 +427,7 @@ inline void CheckInstrument(InstrumentT* instrument, volatile uint8_t& trig_port
   if (instrument->status) {
     if (--instrument->status == TRIGGER_SHUTDOWN_AT) {
       ClearBit(trig_port, trig_bit);
-    } else if (instrument->status == 0 && LightOnHitEnabled()) {
+    } else if (instrument->status == 0 && FlashOnHitEnabled()) {
       ClearBit(led_port, led_bit);
     }
   }
@@ -449,7 +449,7 @@ void CheckInstruments() {
   if (g_hi_hat.status) {
     if (--g_hi_hat.status == TRIGGER_SHUTDOWN_AT) {
       ClearBit(PORT_TRIG_HI_HAT, BIT_TRIG_HI_HAT);
-    } else if (g_hi_hat.status == 0 && LightOnHitEnabled()) {
+    } else if (g_hi_hat.status == 0 && FlashOnHitEnabled()) {
       ClearBit(PORT_LED_CLOSED_HI_HAT, BIT_LED_CLOSED_HI_HAT);
       ClearBit(PORT_LED_OPEN_HI_HAT, BIT_LED_OPEN_HI_HAT);
     }
@@ -495,7 +495,7 @@ int main(void) {
         if ((divider & 0x7f) == 0) {  // every 128 cycles = 16ms
           g_adc.Update();
           if (g_pattern_changed_countdown > 0 && --g_pattern_changed_countdown == 0) {
-            g_operation_mode = g_operation_mode_prev;
+            g_operation_mode = g_operation_mode_prev | kOperationModePatternTransiting;
             if (g_operation_mode & kOperationModeDirectPlay) {
               MapToLed(0);
             } else {

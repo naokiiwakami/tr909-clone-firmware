@@ -223,23 +223,28 @@ class Sequencer {
     }
   }
 
+  /**
+   * Called by the main routine for each 1/24 quarter note tempo clock tick.
+   */
   void StepForward() {
-    if (state_ & kStandByRecording) {
+    // cosmetic: Blink DIN Mute LED fast during StandByRecording mode
+    if ((state_ & kStandByRecording) && (position_ & 0x3)) {
       ToggleBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
     }
+
+    // End here if not in playing mode
     if ((state_ & (kRunning | kStopping)) == 0) {
       return;
     }
+
+    // Update DIN Sync out
+    // TODO: Should this be moved above?
     din_sync_.Clock();
     if (++position_ == kTotalClocks) {
       position_ = 0;
     }
-    auto mod = position_ % 24;
-    if (mod == 0) {
-      SetBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
-    } else if (mod == 3) {
-      ClearBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
-    }
+
+    // Trigger drums
     uint8_t byte = position_ >> 2;
     uint8_t bit = (position_ & 0x3) << 1;
     PlayPatternAt<Drum::kBassDrum>(byte, bit);
@@ -248,6 +253,23 @@ class Sequencer {
     PlayPatternAt<Drum::kHandClap>(byte, bit);
     PlayPatternAt<Drum::kClosedHiHat>(byte, bit);
     PlayPatternAt<Drum::kOpenHiHat>(byte, bit);
+
+    // cosmetic: Blink DIN Mute LED at quarter notes,
+    // next pattern at eighth notes while reading it until the next bar
+    auto mod = position_ % 24;
+    if (eeprom_statuses_ & kReadPattern) {
+      if (mod == 0) {
+        MapToLed(0x40 | (0x20 >> pattern_id_));
+      } else if (mod == 12) {
+        MapToLed(0x20 >> pattern_id_);
+      } else if (mod == 3 || mod == 15) {
+        MapToLed(0);
+      }
+    } else if (mod == 0) {
+      SetBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
+    } else if (mod == 3) {
+      ClearBit(PORT_LED_DIN_MUTE, BIT_LED_DIN_MUTE);
+    }
 
     if (state_ == kStopping && (position_ % kClocksPerBar) == (kClocksPerBar - 1)) {
       HardStop();
@@ -418,6 +440,12 @@ class Sequencer {
       if (data_index_ == kPatternBytes) {
         data_index_ = 0;
         eeprom_statuses_ &= ~kReadPattern;
+        g_operation_mode &= ~kOperationModePatternTransiting;
+        if (g_operation_mode & kOperationModeDirectPlay) {
+          MapToLed(0);
+        } else {
+          MapToLed(drum_masks_);
+        }
       }
     }
   }
